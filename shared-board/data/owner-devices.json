@@ -1,0 +1,76 @@
+{
+  "version": 24,
+  "updatedAt": "2026-08-17T04:32:13.915Z",
+  "devices": [
+    {
+      "id": "f9123534-8bd6-4603-b701-eaa1e1e0cf67",
+      "label": "Windows · Edge",
+      "firstLoginAt": "2026-08-17T02:01:36.217Z",
+      "lastLoginAt": "2026-08-17T02:01:36.217Z",
+      "loginCount": 1
+    },
+    {
+      "id": "c6f8af36-3865-45c4-867f-383f2bafdbcf",
+      "label": "Windows · Edge",
+      "firstLoginAt": "2026-08-17T02:39:58.908Z",
+      "lastLoginAt": "2026-08-17T02:44:40.632Z",
+      "loginCount": 4
+    },
+    {
+      "id": "e388fa5b-c01b-4a9d-83d9-e0aee0156a25",
+      "label": "Windows · Edge",
+      "firstLoginAt": "2026-08-17T03:20:48.236Z",
+      "lastLoginAt": "2026-08-17T03:21:26.664Z",
+      "loginCount": 2
+    },
+    {
+      "id": "dbe7ab03-3047-4f2e-aa3e-065be7362e4e",
+      "label": "Windows · Edge",
+      "firstLoginAt": "2026-08-17T03:22:25.960Z",
+      "lastLoginAt": "2026-08-17T03:23:04.448Z",
+      "loginCount": 2
+    },
+    {
+      "id": "4e091ee2-23eb-4f0d-9bc0-45697de3200f",
+      "label": "Windows · Chrome",
+      "firstLoginAt": "2026-08-17T03:26:53.599Z",
+      "lastLoginAt": "2026-08-17T03:26:53.599Z",
+      "loginCount": 1
+    },
+    {
+      "id": "c2643c43-a2cf-43f0-83db-9eaa55911f89",
+      "label": "Windows · Edge",
+      "firstLoginAt": "2026-08-17T03:49:38.286Z",
+      "lastLoginAt": "2026-08-17T03:53:19.887Z",
+      "loginCount": 3
+    },
+    {
+      "id": "8fd0c385-0d59-4128-84c3-71248b516d27",
+      "label": "Windows · Chrome",
+      "firstLoginAt": "2026-08-17T03:52:30.063Z",
+      "lastLoginAt": "2026-08-17T03:52:50.663Z",
+      "loginCount": 2
+    },
+    {
+      "id": "0775600b-7838-4c30-8adc-fd4f3dd32a95",
+      "label": "Windows · Chrome",
+      "firstLoginAt": "2026-08-17T04:02:44.613Z",
+      "lastLoginAt": "2026-08-17T04:04:30.318Z",
+      "loginCount": 3
+    },
+    {
+      "id": "7fca5f27-24f9-42d4-a920-80513bbfc69f",
+      "label": "Windows · Chrome",
+      "firstLoginAt": "2026-08-17T04:23:30.527Z",
+      "lastLoginAt": "2026-08-17T04:32:13.915Z",
+      "loginCount": 2
+    },
+    {
+      "id": "ba05d1cd-69e2-4178-b620-a354bdef98d8",
+      "label": "Windows · Edge",
+      "firstLoginAt": "2026-08-17T04:26:02.510Z",
+      "lastLoginAt": "2026-08-17T04:27:28.519Z",
+      "loginCount": 3
+    }
+  ]
+}

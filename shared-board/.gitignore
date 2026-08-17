@@ -1,0 +1,5 @@
+*.log
+*.pid
+public-url.txt
+data/settings.json
+OWNER-ACCESS.txt

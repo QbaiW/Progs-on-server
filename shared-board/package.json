@@ -1,0 +1,14 @@
+{
+  "name": "star-bottle",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Interactive 3D origami star bottle",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test-auth.js"
+  },
+  "dependencies": {
+    "cannon-es": "0.20.0",
+    "three": "0.168.0"
+  }
+}

@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#050713">
+    <meta name="description" content="QE给圆圆宝宝的一罐可以打开、收藏与阅读的折纸星星。">
+    <title>QE给圆圆宝宝的星星瓶</title>
+    <link rel="stylesheet" href="/styles.css?v=20260817-custom8">
+    <script type="module" src="/app.js?v=20260817-custom8"></script>
+  </head>
+  <body>
+    <main class="experience" id="experience">
+      <canvas id="starCanvas" aria-label="装满折纸星星的玻璃瓶"></canvas>
+      <div class="night-vignette" aria-hidden="true"></div>
+
+      <header class="topbar">
+        <button class="brand" id="ownerTrigger" type="button" aria-label="QE给圆圆宝宝的星星瓶">
+          <span class="brand-star" aria-hidden="true">✦</span>
+          <span>QE给圆圆宝宝的星星瓶</span>
+        </button>
+        <div class="top-actions">
+          <div class="sync-state" id="syncState" role="status">
+            <span class="sync-dot"></span>
+            <span id="syncText">载入星光</span>
+          </div>
+          <button class="round-button" id="favoritesButton" type="button" title="收藏" aria-label="打开收藏夹">
+            <span aria-hidden="true">♡</span>
+            <span class="count-badge" id="favoriteCount">0</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="emotion-bubbles" id="emotionBubbles" aria-label="情绪颜色">
+        <button class="emotion-bubble emotion-joy" type="button" data-emotion="joy" aria-label="开心"><span class="emoji" aria-hidden="true">☺</span><span>开心</span></button>
+        <button class="emotion-bubble emotion-anger" type="button" data-emotion="anger" aria-label="生气"><span class="emoji" aria-hidden="true">怒</span><span>生气</span></button>
+        <button class="emotion-bubble emotion-anxiety" type="button" data-emotion="anxiety" aria-label="焦虑"><span class="emoji" aria-hidden="true">…</span><span>焦虑</span></button>
+        <button class="emotion-bubble emotion-sadness" type="button" data-emotion="sadness" aria-label="伤心"><span class="emoji" aria-hidden="true">泪</span><span>伤心</span></button>
+        <button class="emotion-bubble emotion-baby" type="button" data-emotion="baby" aria-label="宝宝！！" hidden><span class="emoji" aria-hidden="true">宝</span><span>宝宝！！</span></button>
+        <button class="emotion-bubble emotion-custom" type="button" data-emotion="custom" aria-label="自定义状态" hidden><span class="emoji" aria-hidden="true">★</span><span>自定义状态</span></button>
+      </div>
+
+      <div class="loading-layer" id="loadingLayer" role="status">
+        <div class="loading-star" aria-hidden="true">✦</div>
+        <p id="loadingText">正在装入星光</p>
+      </div>
+
+      <aside class="side-panel favorites-panel" id="favoritesPanel" aria-hidden="true" aria-label="收藏夹">
+        <header class="panel-header">
+          <div><p class="eyebrow">MY STARS</p><h2>收藏的纸条</h2></div>
+          <button class="plain-icon-button" id="closeFavorites" type="button" title="关闭" aria-label="关闭收藏夹">×</button>
+        </header>
+        <div class="favorites-list" id="favoritesList"></div>
+        <p class="empty-state" id="emptyFavorites">还没有收藏的星星</p>
+      </aside>
+
+      <section class="note-layer" id="noteLayer" aria-hidden="true" aria-label="展开的星星纸条">
+        <button class="note-backdrop" id="noteBackdrop" type="button" aria-label="关闭纸条"></button>
+        <div class="unfolded-note" id="unfoldedNote">
+          <div class="paper-shape" id="paperShape">
+            <span class="crease crease-a" aria-hidden="true"></span><span class="crease crease-b" aria-hidden="true"></span><span class="crease crease-c" aria-hidden="true"></span><span class="crease crease-d" aria-hidden="true"></span>
+            <p class="note-copy" id="noteCopy"></p>
+          </div>
+          <div class="note-actions">
+            <span class="note-emotion" id="noteEmotion"></span>
+            <button class="favorite-note-button" id="favoriteNoteButton" type="button" title="收藏这张纸条" aria-label="收藏这张纸条"><span aria-hidden="true">♡</span></button>
+            <button class="plain-icon-button note-close" id="closeNote" type="button" title="关闭" aria-label="关闭纸条">×</button>
+          </div>
+        </div>
+      </section>
+
+      <dialog class="owner-login" id="ownerLogin">
+        <form method="dialog" id="ownerLoginForm">
+          <button class="plain-icon-button dialog-close" value="cancel" type="submit" title="关闭" aria-label="关闭">×</button>
+          <p class="eyebrow">OWNER ACCESS</p><h2>进入星星编辑室</h2>
+          <label for="ownerPassword">管理密码</label>
+          <input id="ownerPassword" name="password" type="password" autocomplete="current-password" required>
+          <p class="form-message" id="loginMessage" role="status"></p>
+          <button class="primary-button" value="login" type="submit">进入编辑室</button>
+        </form>
+      </dialog>
+
+      <aside class="side-panel editor-panel" id="editorPanel" aria-hidden="true" aria-label="星星编辑室">
+        <header class="panel-header">
+          <div><p class="eyebrow">OWNER MODE</p><h2>星星编辑室</h2></div>
+          <button class="plain-icon-button" id="closeEditor" type="button" title="关闭" aria-label="关闭编辑室">×</button>
+        </header>
+        <div class="editor-search-wrap" id="editorSearchWrap"><span aria-hidden="true">⌕</span><input id="editorSearch" type="search" placeholder="搜索编号或文字" aria-label="搜索纸条"></div>
+        <nav class="editor-tabs" aria-label="主人视图">
+          <button class="editor-tab active" id="editorNotesTab" type="button" data-editor-view="notes">纸条编辑</button>
+          <button class="editor-tab" id="editorActivityTab" type="button" data-editor-view="activity">打开记录</button>
+          <button class="editor-tab" id="editorDevicesTab" type="button" data-editor-view="devices">主人设备</button>
+        </nav>
+        <div class="editor-view" id="editorNotesView">
+          <div class="editor-layout">
+            <div class="editor-note-list" id="editorNoteList" role="listbox" aria-label="纸条列表"></div>
+            <form class="note-editor-form" id="noteEditorForm">
+              <div class="editor-fields-scroll">
+                <div class="editor-selection-meta"><span id="editorNoteId">请选择一颗星星</span><span id="editorEmotion"></span></div>
+                <label for="editorEmotionSelect">情绪属性</label>
+                <select class="editor-emotion-select" id="editorEmotionSelect" disabled>
+                  <option value="joy">开心</option>
+                  <option value="anger">生气</option>
+                  <option value="anxiety">焦虑</option>
+                  <option value="sadness">伤心</option>
+                  <option value="baby">宝宝！！</option>
+                  <option value="custom">自定义状态</option>
+                </select>
+                <div class="editor-custom-fields" id="editorCustomFields" hidden>
+                  <label for="editorCustomLabel">自定义状态名称</label>
+                  <input id="editorCustomLabel" type="text" maxlength="24" placeholder="例如：想你了" disabled>
+                  <label for="editorCustomPosition">星河位置</label>
+                  <select class="editor-emotion-select" id="editorCustomPosition" disabled>
+                    <option value="left">左侧（默认）</option>
+                    <option value="right">右侧</option>
+                  </select>
+                </div>
+                <label for="editorColor">星星颜色</label>
+                <div class="editor-color-row">
+                  <input id="editorColor" type="color" value="#ff863e" disabled aria-label="选择这颗星星的颜色">
+                  <output class="editor-color-value" id="editorColorValue" for="editorColor">#FF863E</output>
+                  <button class="secondary-button compact" id="resetEditorColor" type="button" disabled>使用状态默认色</button>
+                </div>
+                <label for="editorText">纸条内容</label>
+                <textarea id="editorText" maxlength="500" disabled></textarea>
+              </div>
+              <div class="editor-form-footer"><span id="editorSaveState" role="status">请选择一颗星星</span><button class="primary-button save-note-button" id="saveNoteButton" type="submit" data-state="idle" disabled>请选择纸条</button></div>
+            </form>
+          </div>
+        </div>
+        <section class="editor-view activity-view" id="editorActivityView" hidden aria-label="打开记录">
+          <header class="activity-toolbar">
+            <span class="activity-summary" id="activitySummary">尚未读取记录</span>
+            <div class="activity-actions">
+              <button class="secondary-button compact" id="refreshActivityButton" type="button">刷新记录</button>
+              <button class="secondary-button compact danger" id="clearActivityButton" type="button">清空记录</button>
+            </div>
+          </header>
+          <div class="activity-list" id="activityList"></div>
+          <p class="empty-state" id="emptyActivity">还没有星星被打开</p>
+        </section>
+        <section class="editor-view activity-view" id="editorDevicesView" hidden aria-label="主人设备">
+          <header class="activity-toolbar">
+            <span class="activity-summary" id="devicesSummary">尚未读取设备</span>
+            <button class="secondary-button compact" id="refreshDevicesButton" type="button">刷新设备</button>
+          </header>
+          <div class="activity-list" id="devicesList"></div>
+          <p class="empty-state" id="emptyDevices">还没有设备进入过主人后台</p>
+        </section>
+      </aside>
+
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    </main>
+  </body>
+</html>
