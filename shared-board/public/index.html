@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#050713">
     <meta name="description" content="QE给圆圆宝宝的一罐可以打开、收藏与阅读的折纸星星。">
     <title>QE给圆圆宝宝的星星瓶</title>
-    <link rel="stylesheet" href="/styles.css?v=20260817-custom8">
-    <script type="module" src="/app.js?v=20260817-custom8"></script>
+    <link rel="stylesheet" href="/styles.css?v=20260817-custom10">
+    <script type="module" src="/app.js?v=20260817-custom10"></script>
   </head>
   <body>
     <main class="experience" id="experience">
@@ -23,6 +23,26 @@
           <div class="sync-state" id="syncState" role="status">
             <span class="sync-dot"></span>
             <span id="syncText">载入星光</span>
+          </div>
+          <div class="music-player" id="musicPlayer">
+            <button class="round-button music-button" id="musicButton" type="button" title="背景音乐" aria-label="打开背景音乐控制" aria-expanded="false" aria-controls="musicPopover">
+              <span class="music-icon" aria-hidden="true">♪</span>
+            </button>
+            <div class="music-popover" id="musicPopover" aria-hidden="true" aria-label="背景音乐控制">
+              <div class="music-track-row">
+                <span class="music-track-mark" aria-hidden="true">♫</span>
+                <strong id="musicTrackName">暂无背景音乐</strong>
+              </div>
+              <div class="music-transport">
+                <button class="music-control-button" id="musicPrevious" type="button" title="上一首" aria-label="上一首">‹</button>
+                <button class="music-control-button music-play-button" id="musicPlay" type="button" title="播放" aria-label="播放背景音乐">▶</button>
+                <button class="music-control-button" id="musicNext" type="button" title="下一首" aria-label="下一首">›</button>
+              </div>
+              <label class="music-volume" title="音量">
+                <span aria-hidden="true">♪</span>
+                <input id="musicVolume" type="range" min="0" max="1" step="0.05" value="0.38" aria-label="背景音乐音量">
+              </label>
+            </div>
           </div>
           <button class="round-button" id="favoritesButton" type="button" title="收藏" aria-label="打开收藏夹">
             <span aria-hidden="true">♡</span>
@@ -63,6 +83,7 @@
           </div>
           <div class="note-actions">
             <span class="note-emotion" id="noteEmotion"></span>
+            <span class="note-change-status" id="noteChangeStatus" hidden></span>
             <button class="favorite-note-button" id="favoriteNoteButton" type="button" title="收藏这张纸条" aria-label="收藏这张纸条"><span aria-hidden="true">♡</span></button>
             <button class="plain-icon-button note-close" id="closeNote" type="button" title="关闭" aria-label="关闭纸条">×</button>
           </div>
@@ -85,7 +106,7 @@
           <div><p class="eyebrow">OWNER MODE</p><h2>星星编辑室</h2></div>
           <button class="plain-icon-button" id="closeEditor" type="button" title="关闭" aria-label="关闭编辑室">×</button>
         </header>
-        <div class="editor-search-wrap" id="editorSearchWrap"><span aria-hidden="true">⌕</span><input id="editorSearch" type="search" placeholder="搜索编号或文字" aria-label="搜索纸条"></div>
+        <div class="editor-search-wrap" id="editorSearchWrap"><span aria-hidden="true">⌕</span><input id="editorSearch" type="search" placeholder="搜索编号或文字" aria-label="搜索纸条"><button class="editor-add-button" id="addNoteButton" type="button" title="新增星星" aria-label="新增星星">+</button></div>
         <nav class="editor-tabs" aria-label="主人视图">
           <button class="editor-tab active" id="editorNotesTab" type="button" data-editor-view="notes">纸条编辑</button>
           <button class="editor-tab" id="editorActivityTab" type="button" data-editor-view="activity">打开记录</button>
@@ -106,6 +127,12 @@
                   <option value="baby">宝宝！！</option>
                   <option value="custom">自定义状态</option>
                 </select>
+                <label for="editorChangeStatus">阅读状态</label>
+                <select class="editor-emotion-select" id="editorChangeStatus" disabled>
+                  <option value="read">已读</option>
+                  <option value="unread">未读</option>
+                </select>
+                <output class="editor-change-meta" id="editorChangeMeta" role="status"></output>
                 <div class="editor-custom-fields" id="editorCustomFields" hidden>
                   <label for="editorCustomLabel">自定义状态名称</label>
                   <input id="editorCustomLabel" type="text" maxlength="24" placeholder="例如：想你了" disabled>
@@ -124,7 +151,7 @@
                 <label for="editorText">纸条内容</label>
                 <textarea id="editorText" maxlength="500" disabled></textarea>
               </div>
-              <div class="editor-form-footer"><span id="editorSaveState" role="status">请选择一颗星星</span><button class="primary-button save-note-button" id="saveNoteButton" type="submit" data-state="idle" disabled>请选择纸条</button></div>
+              <div class="editor-form-footer"><span id="editorSaveState" role="status">请选择一颗星星</span><div class="editor-form-actions"><button class="secondary-button compact danger" id="deleteNoteButton" type="button" disabled>删除星星</button><button class="primary-button save-note-button" id="saveNoteButton" type="submit" data-state="idle" disabled>请选择纸条</button></div></div>
             </form>
           </div>
         </div>

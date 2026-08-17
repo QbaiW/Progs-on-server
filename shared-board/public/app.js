@@ -1,4 +1,4 @@
-import { StarBottleScene } from "/scene.js?v=20260817-custom8";
+import { StarBottleScene } from "/scene.js?v=20260817-custom10";
 
 const EMOTIONS = {
   joy: { label: "开心", color: "#ff863e", level: 1 },
@@ -10,6 +10,8 @@ const EMOTIONS = {
 };
 
 const STAR_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
+const MAX_STAR_COUNT = 500;
+const MUSIC_SETTINGS_KEY = "star-bottle-music-settings-v1";
 
 const elements = {
   canvas: document.querySelector("#starCanvas"),
@@ -17,6 +19,14 @@ const elements = {
   loadingText: document.querySelector("#loadingText"),
   syncState: document.querySelector("#syncState"),
   syncText: document.querySelector("#syncText"),
+  musicPlayer: document.querySelector("#musicPlayer"),
+  musicButton: document.querySelector("#musicButton"),
+  musicPopover: document.querySelector("#musicPopover"),
+  musicTrackName: document.querySelector("#musicTrackName"),
+  musicPrevious: document.querySelector("#musicPrevious"),
+  musicPlay: document.querySelector("#musicPlay"),
+  musicNext: document.querySelector("#musicNext"),
+  musicVolume: document.querySelector("#musicVolume"),
   emotionBubbles: document.querySelector("#emotionBubbles"),
   favoritesButton: document.querySelector("#favoritesButton"),
   favoritesPanel: document.querySelector("#favoritesPanel"),
@@ -29,6 +39,7 @@ const elements = {
   paperShape: document.querySelector("#paperShape"),
   noteCopy: document.querySelector("#noteCopy"),
   noteEmotion: document.querySelector("#noteEmotion"),
+  noteChangeStatus: document.querySelector("#noteChangeStatus"),
   favoriteNoteButton: document.querySelector("#favoriteNoteButton"),
   closeNote: document.querySelector("#closeNote"),
   ownerTrigger: document.querySelector("#ownerTrigger"),
@@ -40,10 +51,13 @@ const elements = {
   closeEditor: document.querySelector("#closeEditor"),
   editorSearchWrap: document.querySelector("#editorSearchWrap"),
   editorSearch: document.querySelector("#editorSearch"),
+  addNoteButton: document.querySelector("#addNoteButton"),
   editorNoteList: document.querySelector("#editorNoteList"),
   noteEditorForm: document.querySelector("#noteEditorForm"),
   editorNoteId: document.querySelector("#editorNoteId"),
   editorEmotion: document.querySelector("#editorEmotion"),
+  editorChangeStatus: document.querySelector("#editorChangeStatus"),
+  editorChangeMeta: document.querySelector("#editorChangeMeta"),
   editorEmotionSelect: document.querySelector("#editorEmotionSelect"),
   editorCustomFields: document.querySelector("#editorCustomFields"),
   editorCustomLabel: document.querySelector("#editorCustomLabel"),
@@ -54,6 +68,7 @@ const elements = {
   editorText: document.querySelector("#editorText"),
   editorSaveState: document.querySelector("#editorSaveState"),
   saveNoteButton: document.querySelector("#saveNoteButton"),
+  deleteNoteButton: document.querySelector("#deleteNoteButton"),
   editorNotesTab: document.querySelector("#editorNotesTab"),
   editorActivityTab: document.querySelector("#editorActivityTab"),
   editorDevicesTab: document.querySelector("#editorDevicesTab"),
@@ -89,7 +104,16 @@ const state = {
   ownerToken: null,
   editorDirty: false,
   editorSaving: false,
+  editorChangeStatusTouched: false,
+  editorCreating: false,
   editorRevision: 0,
+  music: {
+    tracks: [],
+    index: 0,
+    audio: null,
+    loading: false,
+    settings: readMusicSettings(),
+  },
 };
 
 function readFavorites() {
@@ -109,6 +133,25 @@ function cacheFavorites() {
 
 const OWNER_TOKEN_KEY = "star-bottle-owner-token";
 const FAVORITES_MIGRATION_KEY = "star-bottle-favorites-migrated-v1";
+
+function readMusicSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(MUSIC_SETTINGS_KEY) || "{}");
+    const volume = Number(saved.volume);
+    return {
+      volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.38,
+      trackUrl: typeof saved.trackUrl === "string" ? saved.trackUrl : "",
+    };
+  } catch {
+    return { volume: 0.38, trackUrl: "" };
+  }
+}
+
+function storeMusicSettings() {
+  try {
+    localStorage.setItem(MUSIC_SETTINGS_KEY, JSON.stringify(state.music.settings));
+  } catch { /* playback still works without persistence */ }
+}
 
 function readOwnerToken() {
   try {
@@ -215,6 +258,9 @@ function recordNoteOpen(note, detail = {}) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ noteId: note.id, visitorId: state.visitorId, source }),
     keepalive: true,
+  }).then(async (response) => {
+    const result = await readApiResult(response);
+    if (result.note?.id) installNotePatch(result.note);
   }).catch(() => {});
 }
 
@@ -235,6 +281,145 @@ function setPanel(panel, open) {
   panel.setAttribute("aria-hidden", String(!open));
 }
 
+function setMusicPopover(open) {
+  elements.musicPopover.classList.toggle("open", open);
+  elements.musicPopover.setAttribute("aria-hidden", String(!open));
+  elements.musicButton.setAttribute("aria-expanded", String(open));
+  if (open) loadMusicLibrary().catch(() => updateMusicUi());
+}
+
+function normalizeMusicTracks(payload) {
+  if (!payload || !Array.isArray(payload.tracks)) throw new Error("背景音乐列表格式不正确");
+  return payload.tracks.flatMap((track) => {
+    const url = typeof track?.url === "string" ? track.url : "";
+    if (!/^\/music\/[^?#]+$/i.test(url)) return [];
+    return [{
+      url,
+      title: String(track.title || track.file || "背景音乐").trim() || "背景音乐",
+    }];
+  });
+}
+
+function ensureMusicAudio() {
+  if (state.music.audio) return state.music.audio;
+  const audio = new Audio();
+  audio.preload = "metadata";
+  audio.volume = state.music.settings.volume;
+  audio.addEventListener("play", updateMusicUi);
+  audio.addEventListener("pause", updateMusicUi);
+  audio.addEventListener("ended", () => changeMusicTrack(1, true));
+  audio.addEventListener("error", () => {
+    updateMusicUi();
+    if (state.music.tracks.length) showToast("这首背景音乐暂时无法播放");
+  });
+  state.music.audio = audio;
+  return audio;
+}
+
+function updateMusicUi() {
+  const music = state.music;
+  const track = music.tracks[music.index];
+  const playing = Boolean(music.audio && !music.audio.paused);
+  elements.musicTrackName.textContent = music.loading
+    ? "读取背景音乐"
+    : track?.title || "暂无背景音乐";
+  elements.musicButton.classList.toggle("playing", playing);
+  elements.musicButton.title = track ? (playing ? "背景音乐播放中" : "背景音乐") : "暂无背景音乐";
+  elements.musicPlay.textContent = playing ? "Ⅱ" : "▶";
+  elements.musicPlay.title = playing ? "暂停" : "播放";
+  elements.musicPlay.setAttribute("aria-label", playing ? "暂停背景音乐" : "播放背景音乐");
+  elements.musicPrevious.disabled = !track;
+  elements.musicPlay.disabled = !track;
+  elements.musicNext.disabled = !track;
+  elements.musicVolume.disabled = !track;
+  elements.musicVolume.value = String(music.settings.volume);
+}
+
+async function selectMusicTrack(index, { autoplay = false } = {}) {
+  const music = state.music;
+  if (!music.tracks.length) {
+    updateMusicUi();
+    return false;
+  }
+  const audio = ensureMusicAudio();
+  const wasPlaying = !audio.paused;
+  music.index = (index + music.tracks.length) % music.tracks.length;
+  const track = music.tracks[music.index];
+  audio.pause();
+  audio.src = track.url;
+  audio.dataset.trackUrl = track.url;
+  audio.load();
+  music.settings.trackUrl = track.url;
+  storeMusicSettings();
+  updateMusicUi();
+  if (autoplay || wasPlaying) {
+    try {
+      await audio.play();
+    } catch {
+      showToast("请再次点击播放背景音乐");
+    }
+  }
+  return true;
+}
+
+async function loadMusicLibrary() {
+  const music = state.music;
+  if (music.loading) return;
+  music.loading = true;
+  updateMusicUi();
+  try {
+    const response = await fetch("/api/music", { cache: "no-store" });
+    if (!response.ok) throw new Error("背景音乐列表读取失败");
+    const payload = await response.json();
+    const previousUrl = music.tracks[music.index]?.url || music.settings.trackUrl;
+    music.tracks = normalizeMusicTracks(payload);
+    ensureMusicAudio();
+    if (music.tracks.length) {
+      const savedIndex = music.tracks.findIndex((track) => track.url === previousUrl);
+      await selectMusicTrack(savedIndex >= 0 ? savedIndex : 0);
+    } else {
+      music.audio.pause();
+      music.audio.removeAttribute("src");
+      delete music.audio.dataset.trackUrl;
+      music.audio.load();
+    }
+  } catch (error) {
+    music.tracks = [];
+    showToast(error.message || "背景音乐暂时无法连接");
+  } finally {
+    music.loading = false;
+    updateMusicUi();
+  }
+}
+
+async function toggleMusicPlayback() {
+  if (!state.music.tracks.length) await loadMusicLibrary();
+  if (!state.music.tracks.length) {
+    showToast("暂无背景音乐");
+    return;
+  }
+  const audio = ensureMusicAudio();
+  if (audio.dataset.trackUrl !== state.music.tracks[state.music.index].url) {
+    await selectMusicTrack(state.music.index);
+  }
+  if (audio.paused) {
+    try {
+      await audio.play();
+    } catch {
+      showToast("请再次点击播放背景音乐");
+    }
+  } else {
+    audio.pause();
+  }
+  updateMusicUi();
+}
+
+async function changeMusicTrack(direction, autoplay = false) {
+  if (!state.music.tracks.length) await loadMusicLibrary();
+  if (!state.music.tracks.length) return;
+  await selectMusicTrack(state.music.index + direction, { autoplay });
+}
+
 function normalizeNotes(payload) {
   const source = Array.isArray(payload) ? payload : payload?.notes;
   if (!Array.isArray(source)) throw new Error("纸条数据格式不正确");
@@ -252,6 +437,10 @@ function normalizeNotes(payload) {
       color: typeof note.color === "string" && STAR_COLOR_PATTERN.test(note.color)
         ? note.color.toLowerCase()
         : EMOTIONS[emotion].color,
+      changeStatus: note.changeStatus === "unread" ? "unread" : "read",
+      changeReason: ["added", "updated", "manual"].includes(note.changeReason) ? note.changeReason : "",
+      changeAt: typeof note.changeAt === "string" ? note.changeAt : "",
+      readAt: typeof note.readAt === "string" ? note.readAt : "",
     };
   });
 }
@@ -335,12 +524,20 @@ function installNotes(notes) {
       elements.paperShape.style.setProperty("--note-color", colorFor(state.selectedNote));
       elements.noteCopy.textContent = state.selectedNote.text;
       elements.noteEmotion.textContent = emotionFor(state.selectedNote).label;
+      updateOpenNoteChangeStatus(state.selectedNote);
       updateNoteFavoriteButton();
+    } else if (!state.selectedNote && elements.noteLayer.classList.contains("open")) {
+      closeNote();
     }
   }
+  if (editingId && !state.editorNote) clearEditorSelection("这颗星星已被删除");
   if (state.editorNote && !state.editorDirty && !state.editorSaving) {
     selectEditorNote(state.editorNote);
   }
+  elements.addNoteButton.disabled = notes.length >= MAX_STAR_COUNT || state.editorCreating;
+  elements.addNoteButton.title = notes.length >= MAX_STAR_COUNT
+    ? `最多保留 ${MAX_STAR_COUNT} 颗星星`
+    : "新增星星";
   cacheFavorites();
   const hasBabyStars = notes.some((note) => note.emotion === "baby");
   const babyBubble = elements.emotionBubbles.querySelector('[data-emotion="baby"]');
@@ -378,11 +575,36 @@ function installNotes(notes) {
   }
 }
 
+function installNotePatch(note) {
+  const normalized = normalizeNotes({ notes: [note] })[0];
+  if (!normalized || !state.noteById.has(normalized.id)) return;
+  installNotes(state.notes.map((candidate) => candidate.id === normalized.id ? normalized : candidate));
+}
+
 function emotionFor(note) {
   const emotion = EMOTIONS[note?.emotion] || EMOTIONS.joy;
   return note?.emotion === "custom"
     ? { ...emotion, label: note.emotionLabel || emotion.label }
     : emotion;
+}
+
+function noteIsUnread(note) {
+  return note?.changeStatus === "unread";
+}
+
+function noteChangeLabel(note) {
+  if (!noteIsUnread(note)) return "已读";
+  if (note.changeReason === "added") return "新增未读";
+  if (note.changeReason === "updated") return "修改未读";
+  return "未读";
+}
+
+function updateOpenNoteChangeStatus(note) {
+  const unread = noteIsUnread(note);
+  elements.noteChangeStatus.hidden = !unread;
+  elements.noteChangeStatus.textContent = unread
+    ? (note.changeReason === "added" ? "新星星" : "有更新")
+    : "";
 }
 
 function colorFor(note) {
@@ -429,6 +651,7 @@ function openNote(note, detail = {}) {
   elements.paperShape.style.setProperty("--note-color", colorFor(note));
   elements.noteCopy.textContent = note.text;
   elements.noteEmotion.textContent = emotion.label;
+  updateOpenNoteChangeStatus(note);
   updateNoteFavoriteButton();
   elements.noteLayer.classList.add("open");
   elements.noteLayer.setAttribute("aria-hidden", "false");
@@ -564,17 +787,33 @@ async function loginOwner(password) {
 function renderEditorList() {
   if (!elements.editorNoteList) return;
   const query = elements.editorSearch.value.trim().toLocaleLowerCase("zh-CN");
-  const filtered = state.notes.filter((note) => !query || note.id.toLowerCase().includes(query) || note.text.toLocaleLowerCase("zh-CN").includes(query));
+  const filtered = state.notes.filter((note) => {
+    if (!query) return true;
+    return note.id.toLowerCase().includes(query) ||
+      note.text.toLocaleLowerCase("zh-CN").includes(query) ||
+      noteChangeLabel(note).toLocaleLowerCase("zh-CN").includes(query);
+  });
   elements.editorNoteList.replaceChildren(...filtered.map((note) => {
-    const emotion = emotionFor(note);
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `editor-note-item${state.editorNote?.id === note.id ? " active" : ""}`;
+    button.className = `editor-note-item${state.editorNote?.id === note.id ? " active" : ""}${noteIsUnread(note) ? " unread" : ""}`;
     button.setAttribute("role", "option");
     button.setAttribute("aria-selected", String(state.editorNote?.id === note.id));
-    button.innerHTML = `<span class="favorite-swatch"></span><span></span>`;
+    button.dataset.noteId = note.id;
+    button.title = `${noteChangeLabel(note)} · ${note.id}`;
     button.style.setProperty("--star-color", colorFor(note));
-    button.querySelector("span:last-child").textContent = `${note.id}  ${note.text}`;
+    const swatch = document.createElement("span");
+    swatch.className = "favorite-swatch";
+    const copy = document.createElement("span");
+    copy.className = "editor-note-copy";
+    const text = document.createElement("span");
+    text.className = "editor-note-text";
+    text.textContent = `${note.id}  ${note.text}`;
+    const status = document.createElement("span");
+    status.className = "editor-note-status";
+    status.textContent = noteChangeLabel(note);
+    copy.append(text, status);
+    button.append(swatch, copy);
     button.addEventListener("click", () => selectEditorNote(note));
     return button;
   }));
@@ -780,26 +1019,83 @@ function updateCustomEditorFields(emotion, note = null) {
   elements.editorEmotion.textContent = elements.editorCustomLabel.value.trim() || EMOTIONS.custom.label;
 }
 
+function updateEditorChangeMeta(note, status = note?.changeStatus) {
+  if (!note) {
+    elements.editorChangeMeta.textContent = "";
+    elements.editorChangeMeta.dataset.state = "";
+    return;
+  }
+  const preview = { ...note, changeStatus: status === "unread" ? "unread" : "read" };
+  const reason = note.changeReason === "added"
+    ? "新增"
+    : note.changeReason === "updated"
+      ? "内容修改"
+      : note.changeReason === "manual"
+        ? "主人设置"
+        : "";
+  const changedAt = note.changeAt ? formatBeijingTime(note.changeAt) : "";
+  elements.editorChangeMeta.textContent = [noteChangeLabel(preview), reason, changedAt]
+    .filter(Boolean)
+    .join(" · ");
+  elements.editorChangeMeta.dataset.state = preview.changeStatus;
+}
+
+function clearEditorSelection(message = "请选择一颗星星") {
+  state.editorNote = null;
+  state.editorDirty = false;
+  state.editorSaving = false;
+  state.editorCreating = false;
+  state.editorChangeStatusTouched = false;
+  state.editorRevision += 1;
+  elements.editorNoteId.textContent = message;
+  elements.editorEmotion.textContent = "";
+  elements.editorEmotionSelect.disabled = true;
+  elements.editorChangeStatus.disabled = true;
+  elements.editorChangeStatus.value = "read";
+  updateEditorChangeMeta(null);
+  elements.editorCustomFields.hidden = true;
+  elements.editorCustomLabel.disabled = true;
+  elements.editorCustomPosition.disabled = true;
+  elements.editorColor.disabled = true;
+  elements.resetEditorColor.disabled = true;
+  elements.editorText.disabled = true;
+  elements.editorText.value = "";
+  elements.deleteNoteButton.disabled = true;
+  setEditorSaveControl(message, "请选择纸条", "idle", true);
+  renderEditorList();
+}
+
 function selectEditorNote(note) {
   state.editorNote = note;
   state.editorDirty = false;
+  state.editorCreating = false;
+  state.editorChangeStatusTouched = false;
   state.editorRevision += 1;
   elements.editorNoteId.textContent = note.id;
   elements.editorEmotion.textContent = emotionFor(note).label;
   elements.editorEmotionSelect.value = note.emotion;
   elements.editorEmotionSelect.disabled = false;
+  elements.editorChangeStatus.value = note.changeStatus === "unread" ? "unread" : "read";
+  elements.editorChangeStatus.disabled = false;
+  updateEditorChangeMeta(note);
   updateCustomEditorFields(note.emotion, note);
   setEditorColor(colorFor(note));
   elements.editorColor.disabled = false;
   elements.resetEditorColor.disabled = false;
   elements.editorText.disabled = false;
   elements.editorText.value = note.text;
+  elements.deleteNoteButton.disabled = state.notes.length <= 1;
+  elements.deleteNoteButton.title = state.notes.length <= 1 ? "至少保留一颗星星" : "删除这颗星星";
   setEditorSaveControl("当前内容已保存", "已保存", "saved", true);
   renderEditorList();
 }
 
-function markEditorDirty() {
+function markEditorDirty(contentChanged = false) {
   if (!state.editorNote) return;
+  if (contentChanged && !state.editorChangeStatusTouched) {
+    elements.editorChangeStatus.value = "unread";
+    updateEditorChangeMeta(state.editorNote, "unread");
+  }
   state.editorDirty = true;
   state.editorRevision += 1;
   if (state.editorSaving) {
@@ -842,6 +1138,9 @@ async function saveEditorNote() {
     customPosition: elements.editorEmotionSelect.value === "custom"
       ? elements.editorCustomPosition.value
       : undefined,
+    changeStatus: state.editorChangeStatusTouched
+      ? elements.editorChangeStatus.value
+      : undefined,
   };
   state.editorSaving = true;
   setEditorSaveControl("正在写入服务器并核对数据", "正在保存…", "saving", true);
@@ -864,6 +1163,7 @@ async function saveEditorNote() {
       persistedNote.text !== submitted.text ||
       persistedNote.emotion !== submitted.emotion ||
       String(persistedNote.color || "").toLowerCase() !== submitted.color.toLowerCase() ||
+      (submitted.changeStatus !== undefined && persistedNote.changeStatus !== submitted.changeStatus) ||
       (submitted.emotion === "custom" && (
         persistedNote.emotionLabel !== submitted.emotionLabel ||
         persistedNote.customPosition !== submitted.customPosition
@@ -910,6 +1210,84 @@ async function saveEditorNote() {
   }
 }
 
+async function createEditorNote() {
+  if (state.editorCreating || state.notes.length >= MAX_STAR_COUNT) return;
+  if (state.editorDirty && !window.confirm("当前修改尚未保存。放弃这些修改并新增星星吗？")) return;
+
+  const source = state.editorNote;
+  const emotion = EMOTIONS[source?.emotion] ? source.emotion : "joy";
+  const submitted = {
+    text: "新星星的纸条",
+    emotion,
+    emotionLabel: emotion === "custom" ? source?.emotionLabel : undefined,
+    customPosition: emotion === "custom" ? source?.customPosition : undefined,
+  };
+  state.editorCreating = true;
+  elements.addNoteButton.disabled = true;
+  elements.addNoteButton.classList.add("working");
+  try {
+    const response = await ownerFetch("/api/owner/notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(submitted),
+    });
+    const result = await readApiResult(response);
+    if (response.status === 401) {
+      setPanel(elements.editorPanel, false);
+      throw new Error("登录已失效，请重新进入编辑室");
+    }
+    if (!response.ok || result.created !== true || !result.document || !result.note) {
+      throw new Error(result.error || "新增星星失败");
+    }
+    state.editorCreating = false;
+    installNotes(normalizeNotes(result.document));
+    const created = state.noteById.get(result.note.id);
+    if (!created) throw new Error("服务器没有返回新星星");
+    selectEditorNote(created);
+    elements.editorNoteList.scrollTop = elements.editorNoteList.scrollHeight;
+    showToast("新星星已加入并标记为未读");
+  } catch (error) {
+    showToast(error.message || "新增星星失败");
+  } finally {
+    state.editorCreating = false;
+    elements.addNoteButton.classList.remove("working");
+    elements.addNoteButton.disabled = state.notes.length >= MAX_STAR_COUNT;
+  }
+}
+
+async function deleteEditorNote() {
+  const note = state.editorNote;
+  if (!note || state.editorSaving || state.notes.length <= 1) return;
+  const warning = state.editorDirty
+    ? `“${note.id}”还有未保存修改，删除后无法恢复。确定删除吗？`
+    : `确定删除星星“${note.id}”吗？此操作无法恢复。`;
+  if (!window.confirm(warning)) return;
+
+  elements.deleteNoteButton.disabled = true;
+  try {
+    const response = await ownerFetch(`/api/owner/notes/${encodeURIComponent(note.id)}`, {
+      method: "DELETE",
+    });
+    const result = await readApiResult(response);
+    if (response.status === 401) {
+      setPanel(elements.editorPanel, false);
+      throw new Error("登录已失效，请重新进入编辑室");
+    }
+    if (!response.ok || result.deleted !== true || !result.document) {
+      throw new Error(result.error || "删除星星失败");
+    }
+    state.editorDirty = false;
+    state.editorNote = null;
+    installNotes(normalizeNotes(result.document));
+    if (result.favorites) installFavorites(normalizeFavorites(result.favorites), { force: true });
+    clearEditorSelection("星星已删除");
+    showToast(`${note.id} 已删除并同步`);
+  } catch (error) {
+    elements.deleteNoteButton.disabled = false;
+    showToast(error.message || "删除星星失败");
+  }
+}
+
 function connectUpdates() {
   const events = new EventSource("/api/events");
   events.addEventListener("notes", (event) => {
@@ -923,6 +1301,25 @@ function connectUpdates() {
 }
 
 function bindUi() {
+  elements.musicButton.addEventListener("click", () => {
+    setMusicPopover(!elements.musicPopover.classList.contains("open"));
+  });
+  elements.musicPrevious.addEventListener("click", () => {
+    changeMusicTrack(-1, Boolean(state.music.audio && !state.music.audio.paused));
+  });
+  elements.musicPlay.addEventListener("click", toggleMusicPlayback);
+  elements.musicNext.addEventListener("click", () => {
+    changeMusicTrack(1, Boolean(state.music.audio && !state.music.audio.paused));
+  });
+  elements.musicVolume.addEventListener("input", () => {
+    const volume = Math.min(1, Math.max(0, Number(elements.musicVolume.value) || 0));
+    state.music.settings.volume = volume;
+    if (state.music.audio) state.music.audio.volume = volume;
+    storeMusicSettings();
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (!elements.musicPlayer.contains(event.target)) setMusicPopover(false);
+  });
   elements.favoritesButton.addEventListener("click", () => setPanel(elements.favoritesPanel, true));
   elements.closeFavorites.addEventListener("click", () => setPanel(elements.favoritesPanel, false));
   elements.noteBackdrop.addEventListener("click", closeNote);
@@ -930,24 +1327,31 @@ function bindUi() {
   elements.favoriteNoteButton.addEventListener("click", toggleSelectedFavorite);
   elements.closeEditor.addEventListener("click", () => setPanel(elements.editorPanel, false));
   elements.editorSearch.addEventListener("input", renderEditorList);
+  elements.addNoteButton.addEventListener("click", createEditorNote);
+  elements.deleteNoteButton.addEventListener("click", deleteEditorNote);
   elements.editorEmotionSelect.addEventListener("change", () => {
     selectEditorEmotion(elements.editorEmotionSelect.value);
-    markEditorDirty();
+    markEditorDirty(true);
+  });
+  elements.editorChangeStatus.addEventListener("change", () => {
+    state.editorChangeStatusTouched = true;
+    updateEditorChangeMeta(state.editorNote, elements.editorChangeStatus.value);
+    markEditorDirty(false);
   });
   elements.editorCustomLabel.addEventListener("input", () => {
     elements.editorEmotion.textContent = elements.editorCustomLabel.value.trim() || EMOTIONS.custom.label;
-    markEditorDirty();
+    markEditorDirty(true);
   });
-  elements.editorCustomPosition.addEventListener("change", markEditorDirty);
+  elements.editorCustomPosition.addEventListener("change", () => markEditorDirty(true));
   elements.editorColor.addEventListener("input", () => {
     setEditorColor(elements.editorColor.value);
-    markEditorDirty();
+    markEditorDirty(true);
   });
   elements.resetEditorColor.addEventListener("click", () => {
     selectEditorEmotion(elements.editorEmotionSelect.value);
-    markEditorDirty();
+    markEditorDirty(true);
   });
-  elements.editorText.addEventListener("input", markEditorDirty);
+  elements.editorText.addEventListener("input", () => markEditorDirty(true));
   elements.noteEditorForm.addEventListener("submit", (event) => { event.preventDefault(); saveEditorNote(); });
   elements.saveNoteButton.addEventListener("click", (event) => { event.preventDefault(); saveEditorNote(); });
   elements.editorNotesTab.addEventListener("click", () => setEditorView("notes"));
@@ -1000,12 +1404,15 @@ function bindUi() {
     if (event.key === "Escape") {
       closeNote();
       setPanel(elements.favoritesPanel, false);
+      setMusicPopover(false);
     }
   });
 }
 
 async function start() {
   bindUi();
+  updateMusicUi();
+  loadMusicLibrary().catch(() => updateMusicUi());
   state.visitorId = readVisitorId();
   state.ownerToken = readOwnerToken();
   try {

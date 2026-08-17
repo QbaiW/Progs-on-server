@@ -12,6 +12,8 @@ const DEFAULT_HOST = process.env.HOST || "127.0.0.1";
 const DEFAULT_PORT = Number(process.env.PORT || 8787);
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_NOTE_LENGTH = 2000;
+const MAX_NOTE_COUNT = 500;
+const MIN_NOTE_COUNT = 1;
 const MAX_ACTIVITY_ENTRIES = 5000;
 const MAX_OWNER_DEVICES = 100;
 const MAX_FAVORITES = 500;
@@ -21,6 +23,8 @@ const DEFAULT_SESSION_HOURS = 12;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_ATTEMPT_LIMIT = 10;
 const STAR_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
+const NOTE_CHANGE_STATUSES = new Set(["read", "unread"]);
+const NOTE_CHANGE_REASONS = new Set(["added", "updated", "manual"]);
 const EMOTION_METADATA = Object.freeze({
   joy: Object.freeze({ label: "开心", colorLevel: 1, color: "#ff863e" }),
   anger: Object.freeze({ label: "生气", colorLevel: 2, color: "#ffb773" }),
@@ -49,10 +53,16 @@ const CONTENT_TYPES = new Map([
   [".ttf", "font/ttf"],
   [".mp3", "audio/mpeg"],
   [".ogg", "audio/ogg"],
+  [".wav", "audio/wav"],
+  [".m4a", "audio/mp4"],
+  [".aac", "audio/aac"],
+  [".flac", "audio/flac"],
   [".glb", "model/gltf-binary"],
   [".gltf", "model/gltf+json"],
   [".hdr", "application/octet-stream"],
 ]);
+
+const MUSIC_EXTENSIONS = new Set([".mp3", ".ogg", ".wav", ".m4a", ".aac", ".flac"]);
 
 const VENDOR_FILES = new Map([
   ["/vendor/three.module.js", path.join(ROOT, "node_modules", "three", "build", "three.module.js")],
@@ -69,6 +79,33 @@ function writeJson(response, statusCode, payload, extraHeaders = {}) {
     ...extraHeaders,
   });
   response.end(JSON.stringify(payload));
+}
+
+async function readMusicTracks(publicDir) {
+  const musicDirectory = path.join(publicDir, "music");
+  let entries;
+  try {
+    entries = await fs.promises.readdir(musicDirectory, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+
+  return entries
+    .filter((entry) => entry.isFile() && MUSIC_EXTENSIONS.has(path.extname(entry.name).toLowerCase()))
+    .map((entry) => {
+      const extension = path.extname(entry.name);
+      const title = path.basename(entry.name, extension).replace(/[_-]+/g, " ").trim();
+      return {
+        file: entry.name,
+        title: title || entry.name,
+        url: `/music/${encodeURIComponent(entry.name)}`,
+      };
+    })
+    .sort((left, right) =>
+      left.title.localeCompare(right.title, "zh-CN", { numeric: true, sensitivity: "base" }),
+    )
+    .slice(0, 100);
 }
 
 function readJsonBody(request) {
@@ -276,8 +313,159 @@ function normalizeCustomPosition(value) {
   return value === "right" ? "right" : "left";
 }
 
+function requestError(message, statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+function normalizeTimestamp(value) {
+  if (typeof value !== "string" || !value.trim()) return "";
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : "";
+}
+
+function normalizeNoteChangeMetadata(note) {
+  return {
+    changeStatus: note.changeStatus === "unread" ? "unread" : "read",
+    changeReason: NOTE_CHANGE_REASONS.has(note.changeReason) ? note.changeReason : "",
+    changeAt: normalizeTimestamp(note.changeAt),
+    readAt: normalizeTimestamp(note.readAt),
+  };
+}
+
+function buildOwnerNote(body, id, currentNote = null, customTemplate = null) {
+  const nextText = body.text === undefined
+    ? (currentNote?.text ?? "新星星的纸条")
+    : body.text;
+  const nextEmotion = body.emotion === undefined
+    ? (currentNote?.emotion ?? "joy")
+    : body.emotion;
+  if (typeof nextText !== "string" || nextText.length > MAX_NOTE_LENGTH) {
+    throw requestError(`纸条内容不能超过 ${MAX_NOTE_LENGTH} 个字符`);
+  }
+  if (!EMOTION_METADATA[nextEmotion]) {
+    throw requestError("请选择有效的星星状态");
+  }
+
+  const emotionMetadata = EMOTION_METADATA[nextEmotion];
+  let nextEmotionLabel = emotionMetadata.label;
+  let nextCustomPosition;
+  if (nextEmotion === "custom") {
+    const submittedLabel = body.emotionLabel === undefined
+      ? (currentNote?.emotion === "custom"
+          ? currentNote.emotionLabel
+          : customTemplate?.emotionLabel || emotionMetadata.label)
+      : body.emotionLabel;
+    if (
+      typeof submittedLabel !== "string" ||
+      !submittedLabel.trim() ||
+      submittedLabel.trim().length > MAX_CUSTOM_EMOTION_LABEL_LENGTH
+    ) {
+      throw requestError(`自定义状态名称需要 1-${MAX_CUSTOM_EMOTION_LABEL_LENGTH} 个字符`);
+    }
+    nextEmotionLabel = submittedLabel.trim();
+    const submittedPosition = body.customPosition === undefined
+      ? (currentNote?.emotion === "custom"
+          ? currentNote.customPosition
+          : customTemplate?.customPosition || "left")
+      : body.customPosition;
+    if (submittedPosition !== "left" && submittedPosition !== "right") {
+      throw requestError("自定义状态位置只能选择左侧或右侧");
+    }
+    nextCustomPosition = submittedPosition;
+  }
+
+  let nextColor;
+  if (body.color === undefined) {
+    nextColor = currentNote && nextEmotion === currentNote.emotion
+      ? currentNote.color
+      : emotionMetadata.color;
+  } else if (body.color === null || body.color === "") {
+    nextColor = emotionMetadata.color;
+  } else if (typeof body.color !== "string" || !STAR_COLOR_PATTERN.test(body.color)) {
+    throw requestError("星星颜色格式不正确");
+  } else {
+    nextColor = body.color.toLowerCase();
+  }
+
+  const note = {
+    id,
+    text: nextText,
+    emotion: nextEmotion,
+    emotionLabel: nextEmotionLabel,
+    colorLevel: emotionMetadata.colorLevel,
+    color: nextColor,
+  };
+  if (nextEmotion === "custom") note.customPosition = nextCustomPosition;
+  return note;
+}
+
+function noteContentChanged(currentNote, nextNote) {
+  return currentNote.text !== nextNote.text ||
+    currentNote.emotion !== nextNote.emotion ||
+    currentNote.emotionLabel !== nextNote.emotionLabel ||
+    currentNote.color !== nextNote.color ||
+    (currentNote.customPosition || "") !== (nextNote.customPosition || "");
+}
+
+function applyNoteChangeMetadata(note, currentNote, body, reason, now) {
+  const submittedStatus = body.changeStatus;
+  if (submittedStatus !== undefined && !NOTE_CHANGE_STATUSES.has(submittedStatus)) {
+    throw requestError("阅读状态只能选择已读或未读");
+  }
+
+  if (!currentNote) {
+    const changeStatus = submittedStatus || "unread";
+    return {
+      ...note,
+      changeStatus,
+      changeReason: "added",
+      changeAt: now,
+      readAt: changeStatus === "read" ? now : "",
+    };
+  }
+
+  const contentChanged = reason === "updated";
+  if (contentChanged) {
+    const changeStatus = submittedStatus || "unread";
+    return {
+      ...note,
+      changeStatus,
+      changeReason: "updated",
+      changeAt: now,
+      readAt: changeStatus === "read" ? now : "",
+    };
+  }
+
+  if (submittedStatus !== undefined) {
+    return {
+      ...note,
+      changeStatus: submittedStatus,
+      changeReason: "manual",
+      changeAt: submittedStatus === "unread" ? now : currentNote.changeAt,
+      readAt: submittedStatus === "read" ? now : "",
+    };
+  }
+
+  return { ...note, ...normalizeNoteChangeMetadata(currentNote) };
+}
+
+function nextNoteId(notes) {
+  const usedIds = new Set(notes.map((note) => note.id));
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const suffix = `${Date.now().toString(36)}-${crypto.randomBytes(3).toString("hex")}`;
+    const id = `star-${suffix}`;
+    if (!usedIds.has(id)) return id;
+  }
+  throw requestError("暂时无法生成新的星星编号，请重试", 503);
+}
+
 function normalizeNotesDocument(raw) {
   if (!raw || !Array.isArray(raw.notes)) throw new Error("notes.json must contain a notes array");
+  if (raw.notes.length > MAX_NOTE_COUNT) {
+    throw new Error(`notes.json cannot contain more than ${MAX_NOTE_COUNT} notes`);
+  }
 
   const ids = new Set();
   const notes = raw.notes.map((note, index) => {
@@ -310,6 +498,7 @@ function normalizeNotesDocument(raw) {
       colorLevel: emotionMetadata.colorLevel,
       color: typeof note.color === "string" ? note.color.toLowerCase() : emotionMetadata.color,
       text: note.text,
+      ...normalizeNoteChangeMetadata(note),
     };
     if (isCustomEmotion) normalizedNote.customPosition = normalizeCustomPosition(note.customPosition);
     return normalizedNote;
@@ -640,6 +829,16 @@ function createStarBottleServer(options = {}) {
       return true;
     }
 
+    if (pathname === "/api/music" && request.method === "GET") {
+      try {
+        writeJson(response, 200, { tracks: await readMusicTracks(realPublicDir) });
+      } catch (error) {
+        console.error(`Could not list background music: ${error.message}`);
+        writeJson(response, 500, { error: "背景音乐列表读取失败" });
+      }
+      return true;
+    }
+
     if (pathname === "/api/notes" && request.method === "GET") {
       writeJson(response, 200, notesDocument);
       return true;
@@ -734,10 +933,6 @@ function createStarBottleServer(options = {}) {
     }
 
     if (pathname === "/api/activity/open" && request.method === "POST") {
-      if (activityRateLimited(request)) {
-        writeJson(response, 429, { error: "Too many activity events" });
-        return true;
-      }
       try {
         const body = await readJsonBody(request);
         const noteId = typeof body.noteId === "string" ? body.noteId.trim() : "";
@@ -751,13 +946,50 @@ function createStarBottleServer(options = {}) {
           writeJson(response, 400, { error: "A valid visitor id is required" });
           return true;
         }
-        const openedNote = notesDocument.notes.find((note) => note.id === noteId);
+        let openedNote = notesDocument.notes.find((note) => note.id === noteId);
         if (!openedNote) {
           writeJson(response, 404, { error: "Note not found" });
           return true;
         }
+
+        let readChanged = false;
+        if (openedNote.changeStatus === "unread") {
+          const readAt = new Date().toISOString();
+          const nextNotes = notesDocument.notes.map((note) => note.id === noteId
+            ? { ...note, changeStatus: "read", readAt }
+            : note);
+          const persistedNotes = await saveNotes({
+            version: notesDocument.version + 1,
+            updatedAt: readAt,
+            notes: nextNotes,
+          });
+          openedNote = persistedNotes.notes.find((note) => note.id === noteId);
+          readChanged = true;
+          broadcast("note", {
+            note: openedNote,
+            version: persistedNotes.version,
+            updatedAt: persistedNotes.updatedAt,
+          });
+          broadcast("notes", persistedNotes);
+        }
+
+        if (activityRateLimited(request)) {
+          writeJson(response, 429, {
+            error: "Too many activity events",
+            read: true,
+            readChanged,
+            note: openedNote,
+          });
+          return true;
+        }
         if (ownerDevicesDocument.devices.some((device) => device.id === visitorId)) {
-          writeJson(response, 200, { recorded: false, reason: "owner-device" });
+          writeJson(response, 200, {
+            recorded: false,
+            reason: "owner-device",
+            read: true,
+            readChanged,
+            note: openedNote,
+          });
           return true;
         }
         const nextDocument = {
@@ -778,7 +1010,12 @@ function createStarBottleServer(options = {}) {
           ].slice(-MAX_ACTIVITY_ENTRIES),
         };
         await saveActivity(nextDocument);
-        writeJson(response, 201, { recorded: true });
+        writeJson(response, 201, {
+          recorded: true,
+          read: true,
+          readChanged,
+          note: openedNote,
+        });
       } catch (error) {
         writeJson(response, error.statusCode || 400, { error: error.message || "Could not record activity" });
       }
@@ -967,7 +1204,125 @@ function createStarBottleServer(options = {}) {
       return true;
     }
 
+    if (pathname === "/api/owner/notes" && request.method === "POST") {
+      if (!sessionFor(request)) {
+        writeJson(response, 401, { error: "主人登录已失效，请重新进入编辑室" });
+        return true;
+      }
+
+      try {
+        const body = await readJsonBody(request);
+        if (notesDocument.notes.length >= MAX_NOTE_COUNT) {
+          throw requestError(`星星数量不能超过 ${MAX_NOTE_COUNT} 颗`, 409);
+        }
+        const requestedId = typeof body.id === "string" ? body.id.trim() : "";
+        const id = requestedId || nextNoteId(notesDocument.notes);
+        if (!/^[a-z0-9-]{1,40}$/.test(id)) throw requestError("星星编号无效");
+        if (notesDocument.notes.some((note) => note.id === id)) {
+          throw requestError("这个星星编号已经存在", 409);
+        }
+
+        const now = new Date().toISOString();
+        const customTemplate = notesDocument.notes.find((note) => note.emotion === "custom") || null;
+        let nextNote = buildOwnerNote(body, id, null, customTemplate);
+        nextNote = applyNoteChangeMetadata(nextNote, null, body, "added", now);
+        const nextNotes = notesDocument.notes.map((note) => {
+          if (nextNote.emotion !== "custom" || note.emotion !== "custom") return note;
+          const synchronized = {
+            ...note,
+            emotionLabel: nextNote.emotionLabel,
+            customPosition: nextNote.customPosition,
+          };
+          return noteContentChanged(note, synchronized)
+            ? applyNoteChangeMetadata(synchronized, note, {}, "updated", now)
+            : note;
+        });
+        nextNotes.push(nextNote);
+        const persistedDocument = await saveNotes({
+          version: notesDocument.version + 1,
+          updatedAt: now,
+          notes: nextNotes,
+        });
+        const persistedNote = persistedDocument.notes.find((note) => note.id === id);
+        console.log(`[notes] Added ${id}; version ${persistedDocument.version}`);
+        broadcast("note", {
+          note: persistedNote,
+          version: persistedDocument.version,
+          updatedAt: persistedDocument.updatedAt,
+        });
+        broadcast("notes", persistedDocument);
+        writeJson(response, 201, {
+          saved: true,
+          created: true,
+          note: persistedNote,
+          document: persistedDocument,
+          version: persistedDocument.version,
+          updatedAt: persistedDocument.updatedAt,
+        });
+      } catch (error) {
+        writeJson(response, error.statusCode || 400, {
+          error: error.message || "新增星星失败",
+          code: error.storageCode,
+        });
+      }
+      return true;
+    }
+
     const ownerNoteMatch = pathname.match(/^\/api\/owner\/notes\/([a-z0-9-]{1,40})$/);
+    if (ownerNoteMatch && request.method === "DELETE") {
+      if (!sessionFor(request)) {
+        writeJson(response, 401, { error: "主人登录已失效，请重新进入编辑室" });
+        return true;
+      }
+
+      try {
+        const id = ownerNoteMatch[1];
+        if (notesDocument.notes.length <= MIN_NOTE_COUNT) {
+          throw requestError("至少需要保留一颗星星", 409);
+        }
+        if (!notesDocument.notes.some((note) => note.id === id)) {
+          throw requestError("没有找到这颗星星", 404);
+        }
+        const now = new Date().toISOString();
+        const persistedDocument = await saveNotes({
+          version: notesDocument.version + 1,
+          updatedAt: now,
+          notes: notesDocument.notes.filter((note) => note.id !== id),
+        });
+
+        let persistedFavorites = favoritesDocument;
+        if (favoritesDocument.noteIds.includes(id)) {
+          try {
+            persistedFavorites = await queueFavoriteWrite(() => saveFavorites({
+              version: favoritesDocument.version + 1,
+              updatedAt: now,
+              noteIds: favoritesDocument.noteIds.filter((noteId) => noteId !== id),
+            }));
+            broadcast("favorites", persistedFavorites);
+          } catch (error) {
+            console.error(`Could not remove deleted note ${id} from favorites: ${error.message}`);
+          }
+        }
+
+        console.log(`[notes] Deleted ${id}; version ${persistedDocument.version}`);
+        broadcast("notes", persistedDocument);
+        writeJson(response, 200, {
+          deleted: true,
+          id,
+          document: persistedDocument,
+          favorites: persistedFavorites,
+          version: persistedDocument.version,
+          updatedAt: persistedDocument.updatedAt,
+        });
+      } catch (error) {
+        writeJson(response, error.statusCode || 400, {
+          error: error.message || "删除星星失败",
+          code: error.storageCode,
+        });
+      }
+      return true;
+    }
+
     const isOwnerNotePost = ownerNoteMatch && request.method === "POST";
     const noteMatch = pathname.match(/^\/api\/notes\/([a-z0-9-]{1,40})$/);
     const isSingleNotePut = noteMatch && request.method === "PUT";
@@ -991,73 +1346,33 @@ function createStarBottleServer(options = {}) {
           return true;
         }
 
+        const now = new Date().toISOString();
         const currentNote = notesDocument.notes[noteIndex];
-        const nextText = body.text === undefined ? currentNote.text : body.text;
-        const nextEmotion = body.emotion === undefined ? currentNote.emotion : body.emotion;
-        if (typeof nextText !== "string" || nextText.length > MAX_NOTE_LENGTH) {
-          writeJson(response, 400, { error: `纸条内容不能超过 ${MAX_NOTE_LENGTH} 个字符` });
-          return true;
-        }
-        if (!EMOTION_METADATA[nextEmotion]) {
-          writeJson(response, 400, { error: "请选择有效的星星状态" });
-          return true;
-        }
-
-        const emotionMetadata = EMOTION_METADATA[nextEmotion];
-        let nextEmotionLabel = emotionMetadata.label;
-        let nextCustomPosition;
-        if (nextEmotion === "custom") {
-          const submittedLabel = body.emotionLabel === undefined
-            ? (currentNote.emotion === "custom" ? currentNote.emotionLabel : emotionMetadata.label)
-            : body.emotionLabel;
-          if (typeof submittedLabel !== "string" || !submittedLabel.trim() || submittedLabel.trim().length > MAX_CUSTOM_EMOTION_LABEL_LENGTH) {
-            writeJson(response, 400, { error: `自定义状态名称需要 1-${MAX_CUSTOM_EMOTION_LABEL_LENGTH} 个字符` });
-            return true;
-          }
-          nextEmotionLabel = submittedLabel.trim();
-          const submittedPosition = body.customPosition === undefined
-            ? (currentNote.emotion === "custom" ? currentNote.customPosition : "left")
-            : body.customPosition;
-          if (submittedPosition !== "left" && submittedPosition !== "right") {
-            writeJson(response, 400, { error: "自定义状态位置只能选择左侧或右侧" });
-            return true;
-          }
-          nextCustomPosition = submittedPosition;
-        }
-        let nextColor;
-        if (body.color === undefined) {
-          nextColor = nextEmotion === currentNote.emotion ? currentNote.color : emotionMetadata.color;
-        } else if (body.color === null || body.color === "") {
-          nextColor = emotionMetadata.color;
-        } else if (typeof body.color !== "string" || !STAR_COLOR_PATTERN.test(body.color)) {
-          writeJson(response, 400, { error: "星星颜色格式不正确" });
-          return true;
-        } else {
-          nextColor = body.color.toLowerCase();
-        }
-        const nextNote = {
-          id: currentNote.id,
-          text: nextText,
-          emotion: nextEmotion,
-          emotionLabel: nextEmotionLabel,
-          colorLevel: emotionMetadata.colorLevel,
-          color: nextColor,
-        };
-        if (nextEmotion === "custom") nextNote.customPosition = nextCustomPosition;
+        const customTemplate = notesDocument.notes.find((note) => note.emotion === "custom") || null;
+        const contentNote = buildOwnerNote(body, id, currentNote, customTemplate);
+        const contentChanged = noteContentChanged(currentNote, contentNote);
+        const nextNote = applyNoteChangeMetadata(
+          contentNote,
+          currentNote,
+          body,
+          contentChanged ? "updated" : "unchanged",
+          now,
+        );
         const nextNotes = notesDocument.notes.map((note, index) => {
           if (index === noteIndex) return nextNote;
-          if (nextEmotion === "custom" && note.emotion === "custom") {
-            return {
-              ...note,
-              emotionLabel: nextEmotionLabel,
-              customPosition: nextCustomPosition,
-            };
-          }
-          return note;
+          if (nextNote.emotion !== "custom" || note.emotion !== "custom") return note;
+          const synchronized = {
+            ...note,
+            emotionLabel: nextNote.emotionLabel,
+            customPosition: nextNote.customPosition,
+          };
+          return noteContentChanged(note, synchronized)
+            ? applyNoteChangeMetadata(synchronized, note, {}, "updated", now)
+            : note;
         });
         const nextDocument = {
           version: notesDocument.version + 1,
-          updatedAt: new Date().toISOString(),
+          updatedAt: now,
           notes: nextNotes,
         };
         const persistedDocument = await saveNotes(nextDocument);

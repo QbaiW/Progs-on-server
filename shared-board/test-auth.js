@@ -38,6 +38,46 @@ test("bundled note data contains 400 notes split evenly across four emotions", (
   assert.equal(new Set(document.notes.map((note) => note.id)).size, 400);
 });
 
+test("background music endpoint lists only supported files", async (context) => {
+  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "star-bottle-music-"));
+  const publicDirectory = path.join(temporaryDirectory, "public");
+  const musicDirectory = path.join(publicDirectory, "music");
+  fs.mkdirSync(musicDirectory, { recursive: true });
+  fs.writeFileSync(path.join(temporaryDirectory, "notes.json"), JSON.stringify(bundledNotes()), "utf8");
+  fs.writeFileSync(path.join(musicDirectory, "calm-night.mp3"), "test-audio", "utf8");
+  fs.writeFileSync(path.join(musicDirectory, "second.ogg"), "test-audio", "utf8");
+  fs.writeFileSync(path.join(musicDirectory, "ignore.txt"), "not-a-track", "utf8");
+
+  const server = createStarBottleServer({
+    dataDir: temporaryDirectory,
+    publicDir: publicDirectory,
+    ownerPassword: TEST_PASSWORD,
+    watch: false,
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  context.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+  });
+
+  const address = server.address();
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const listing = await requestJson(baseUrl, "/api/music");
+  assert.equal(listing.status, 200);
+  assert.deepEqual(
+    new Set(listing.body.tracks.map((track) => track.file)),
+    new Set(["calm-night.mp3", "second.ogg"]),
+  );
+  assert.equal(listing.body.tracks.find((track) => track.file === "calm-night.mp3").title, "calm night");
+
+  const track = await fetch(`${baseUrl}/music/calm-night.mp3`);
+  assert.equal(track.status, 200);
+  assert.match(track.headers.get("content-type"), /^audio\/mpeg/);
+});
+
 test("viewers are read-only and an authenticated owner can edit a note", async (context) => {
   const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "star-bottle-auth-"));
   const source = bundledNotes();
@@ -184,4 +224,111 @@ test("viewers are read-only and an authenticated owner can edit a note", async (
     body: { text: "must remain blocked" },
   });
   assert.equal(afterLogout.status, 401);
+});
+
+test("owner can create, delete, and control a note's read status", async (context) => {
+  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "star-bottle-status-"));
+  const source = bundledNotes();
+  fs.writeFileSync(
+    path.join(temporaryDirectory, "notes.json"),
+    JSON.stringify({ ...source, notes: source.notes.slice(0, 2) }, null, 2),
+    "utf8",
+  );
+
+  const server = createStarBottleServer({
+    dataDir: temporaryDirectory,
+    ownerPassword: TEST_PASSWORD,
+    watch: false,
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  context.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+  });
+
+  const address = server.address();
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const login = await requestJson(baseUrl, "/api/owner/login", {
+    method: "POST",
+    body: { password: TEST_PASSWORD },
+  });
+  assert.equal(login.status, 200);
+  const cookie = login.headers.get("set-cookie").split(";", 1)[0];
+
+  const created = await requestJson(baseUrl, "/api/owner/notes", {
+    method: "POST",
+    cookie,
+    body: { text: "new status note", emotion: "joy" },
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.body.note.changeStatus, "unread");
+  assert.equal(created.body.note.changeReason, "added");
+  assert.equal(created.body.note.readAt, "");
+  const noteId = created.body.note.id;
+
+  const manuallyRead = await requestJson(baseUrl, `/api/owner/notes/${noteId}`, {
+    method: "POST",
+    cookie,
+    body: { changeStatus: "read" },
+  });
+  assert.equal(manuallyRead.status, 200);
+  assert.equal(manuallyRead.body.note.changeStatus, "read");
+  assert.equal(manuallyRead.body.note.changeReason, "manual");
+  assert.ok(manuallyRead.body.note.readAt);
+
+  const manuallyUnread = await requestJson(baseUrl, `/api/owner/notes/${noteId}`, {
+    method: "POST",
+    cookie,
+    body: { changeStatus: "unread" },
+  });
+  assert.equal(manuallyUnread.status, 200);
+  assert.equal(manuallyUnread.body.note.changeStatus, "unread");
+  assert.equal(manuallyUnread.body.note.changeReason, "manual");
+  assert.equal(manuallyUnread.body.note.readAt, "");
+
+  const opened = await requestJson(baseUrl, "/api/activity/open", {
+    method: "POST",
+    body: { noteId, visitorId: "status-reader-001", source: "pointer" },
+  });
+  assert.equal(opened.status, 201);
+  assert.equal(opened.body.readChanged, true);
+  assert.equal(opened.body.note.changeStatus, "read");
+  assert.ok(opened.body.note.readAt);
+
+  const automaticallyUnread = await requestJson(baseUrl, `/api/owner/notes/${noteId}`, {
+    method: "POST",
+    cookie,
+    body: { text: "updated status note" },
+  });
+  assert.equal(automaticallyUnread.status, 200);
+  assert.equal(automaticallyUnread.body.note.changeStatus, "unread");
+  assert.equal(automaticallyUnread.body.note.changeReason, "updated");
+
+  const updatedButRead = await requestJson(baseUrl, `/api/owner/notes/${noteId}`, {
+    method: "POST",
+    cookie,
+    body: { text: "updated and acknowledged", changeStatus: "read" },
+  });
+  assert.equal(updatedButRead.status, 200);
+  assert.equal(updatedButRead.body.note.changeStatus, "read");
+  assert.equal(updatedButRead.body.note.changeReason, "updated");
+
+  const favorite = await requestJson(baseUrl, `/api/favorites/${noteId}`, {
+    method: "POST",
+    body: { favorite: true },
+  });
+  assert.equal(favorite.status, 200);
+  assert.equal(favorite.body.favorite, true);
+
+  const deleted = await requestJson(baseUrl, `/api/owner/notes/${noteId}`, {
+    method: "DELETE",
+    cookie,
+  });
+  assert.equal(deleted.status, 200);
+  assert.equal(deleted.body.deleted, true);
+  assert.equal(deleted.body.document.notes.length, 2);
+  assert.equal(deleted.body.favorites.noteIds.includes(noteId), false);
 });

@@ -1,11 +1,13 @@
 const DEFAULT_STAR_COUNT = 400;
-const MIN_STAR_COUNT = 300;
+const MIN_STAR_COUNT = 1;
 const MAX_STAR_COUNT = 500;
 const STAR_SCALE = 0.13;
 const STAR_COLLISION_RADIUS = 0.128;
 const FLOAT_COLLISION_DISTANCE = 0.315;
-const FLOAT_POINTER_RADIUS = 0.62;
-const FLOAT_RETURN_MAX_SPEED = 1.18;
+const FLOAT_POINTER_RADIUS = 1.08;
+const FLOAT_NEIGHBOR_INFLUENCE_DISTANCE = 0.72;
+const FLOAT_NEIGHBOR_WAKE_MIN_SPEED = 0.018;
+const FLOAT_RETURN_MAX_SPEED = 1.36;
 const STAR_HIT_RADIUS_MIN = 16;
 const STAR_HIT_RADIUS_MAX = 25;
 const RELEASE_BATCH_SIZE = 4;
@@ -24,6 +26,7 @@ export const EMOTION_STYLES = Object.freeze({
 
 const EMOTION_KEYS = ["joy", "anger", "anxiety", "sadness", "baby", "custom"];
 const DEFAULT_EMOTION_KEYS = ["joy", "anger", "anxiety", "sadness"];
+const RELEASE_EMOTION_KEYS = [...DEFAULT_EMOTION_KEYS].reverse();
 const DEPENDENCY_URLS = Object.freeze({
   three: [
     "/vendor/three.module.js",
@@ -52,6 +55,23 @@ function seededRandom(seed) {
     state = (state * 1664525 + 1013904223) >>> 0;
     return state / 4294967296;
   };
+}
+
+function runtimeSeed() {
+  const values = new Uint32Array(1);
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(values);
+    return values[0];
+  }
+  return (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+}
+
+function shuffleInPlace(values, random) {
+  for (let index = values.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [values[index], values[swapIndex]] = [values[swapIndex], values[index]];
+  }
+  return values;
 }
 
 function emotionKeyFrom(value, fallbackIndex = 0, total = DEFAULT_STAR_COUNT) {
@@ -172,6 +192,10 @@ export class StarBottleScene {
     this.draggedStarIndex = -1;
     this.pointerType = "mouse";
     this.bottleRetired = false;
+    const configuredLayoutSeed = Number(options.layoutSeed);
+    this.layoutSeed = Number.isFinite(configuredLayoutSeed)
+      ? Math.floor(configuredLayoutSeed) >>> 0
+      : runtimeSeed();
     this._random = seededRandom(917204);
     this.ready = this._initialize(options);
   }
@@ -252,6 +276,7 @@ export class StarBottleScene {
 
     this.raycaster = new THREE.Raycaster();
     this.instanceDummy = new THREE.Object3D();
+    this.statusMarkerDummy = new THREE.Object3D();
     this.tempColor = new THREE.Color();
     this.highlightColor = new THREE.Color(0xffffff);
     this._tmpVector = new THREE.Vector3();
@@ -268,6 +293,12 @@ export class StarBottleScene {
     this._floatQuaternion = new THREE.Quaternion();
     this._waveNormal = new THREE.Vector3();
     this._worldUp = new THREE.Vector3(0, 1, 0);
+    this._bottleWorldQuaternion = new THREE.Quaternion();
+    this._bottleInverseQuaternion = new THREE.Quaternion();
+    this._physicsLocalPosition = new THREE.Vector3();
+    this._physicsWorldPosition = new THREE.Vector3();
+    this._physicsLocalVelocity = new THREE.Vector3();
+    this._physicsWorldVelocity = new THREE.Vector3();
 
     this.scene.add(new THREE.HemisphereLight(0xb8c9ff, 0x170e10, 1.55));
     this.scene.add(new THREE.AmbientLight(0xffead3, 1.65));
@@ -294,8 +325,8 @@ export class StarBottleScene {
 
     this.world = new CANNON.World({ gravity: new CANNON.Vec3(0, 0, 0) });
     this.world.allowSleep = true;
-    this.world.solver.iterations = 11;
-    this.world.solver.tolerance = 0.001;
+    this.world.solver.iterations = 15;
+    this.world.solver.tolerance = 0.0005;
     if (CANNON.SAPBroadphase) this.world.broadphase = new CANNON.SAPBroadphase(this.world);
 
     this.starPhysicsMaterial = new CANNON.Material("folded-paper");
@@ -533,17 +564,17 @@ export class StarBottleScene {
   _createBottleColliders() {
     const CANNON = this.CANNON;
     const definitions = [
-      { p: [0, -2.11, 0], h: [1.22, 0.075, 0.93], r: 0 },
-      { p: [-1.29, -0.695, 0], h: [0.065, 1.355, 0.95], r: 0 },
-      { p: [1.29, -0.695, 0], h: [0.065, 1.355, 0.95], r: 0 },
-      { p: [0, -0.695, -0.96], h: [1.23, 1.355, 0.055], r: 0 },
-      { p: [0, -0.695, 0.96], h: [1.23, 1.355, 0.055], r: 0 },
-      { p: [-1.19, 0.91, 0], h: [0.12, 0.27, 0.95], r: -0.46 },
-      { p: [1.19, 0.91, 0], h: [0.12, 0.27, 0.95], r: 0.46 },
-      { p: [-0.985, 1.32, 0], h: [0.06, 0.22, 0.95], r: 0 },
-      { p: [0.985, 1.32, 0], h: [0.06, 0.22, 0.95], r: 0 },
-      { p: [0, 1.32, -0.96], h: [0.93, 0.22, 0.055], r: 0 },
-      { p: [0, 1.32, 0.96], h: [0.93, 0.22, 0.055], r: 0 },
+      { p: [0, -2.11, 0], h: [1.24, 0.11, 0.95], r: 0 },
+      { p: [-1.29, -0.695, 0], h: [0.1, 1.39, 1.0], r: 0 },
+      { p: [1.29, -0.695, 0], h: [0.1, 1.39, 1.0], r: 0 },
+      { p: [0, -0.695, -0.96], h: [1.28, 1.39, 0.085], r: 0 },
+      { p: [0, -0.695, 0.96], h: [1.28, 1.39, 0.085], r: 0 },
+      { p: [-1.19, 0.91, 0], h: [0.16, 0.31, 1.0], r: -0.46 },
+      { p: [1.19, 0.91, 0], h: [0.16, 0.31, 1.0], r: 0.46 },
+      { p: [-0.985, 1.32, 0], h: [0.09, 0.25, 1.0], r: 0 },
+      { p: [0.985, 1.32, 0], h: [0.09, 0.25, 1.0], r: 0 },
+      { p: [0, 1.32, -0.96], h: [0.98, 0.25, 0.085], r: 0 },
+      { p: [0, 1.32, 0.96], h: [0.98, 0.25, 0.085], r: 0 },
     ];
 
     for (const definition of definitions) {
@@ -708,6 +739,10 @@ export class StarBottleScene {
           ? String(value.emotionLabel || EMOTION_STYLES.custom.label).slice(0, 24)
           : EMOTION_STYLES[emotion].label,
         customPosition: emotion === "custom" && value.customPosition === "right" ? "right" : "left",
+        changeStatus: value.changeStatus === "unread" ? "unread" : "read",
+        changeReason: ["added", "updated", "manual"].includes(value.changeReason)
+          ? value.changeReason
+          : "",
         _sourceOrder: index,
       };
     });
@@ -723,6 +758,8 @@ export class StarBottleScene {
         emotion,
         emotionLabel: EMOTION_STYLES[emotion].label,
         customPosition: "left",
+        changeStatus: "read",
+        changeReason: "",
         _sourceOrder: index,
       });
     }
@@ -791,7 +828,7 @@ export class StarBottleScene {
     const fieldWidth = Math.sqrt(fieldArea * layoutAspect);
     const fieldDepth = fieldArea / fieldWidth;
     const centerX = aspect < 0.78 ? 0.12 : 0.86;
-    const random = seededRandom(31847 + count * 7919);
+    const random = seededRandom((this.layoutSeed ^ (count * 7919) ^ 31847) >>> 0);
     const points = [];
 
     const makeCandidate = () => {
@@ -875,28 +912,19 @@ export class StarBottleScene {
   _buildReleaseQueue(records) {
     const buckets = Object.fromEntries(EMOTION_KEYS.map((key) => [key, []]));
     for (const record of records) buckets[record.emotion].push(record);
+    const random = seededRandom((this.layoutSeed ^ 0x7f4a7c15) >>> 0);
     for (const bucket of Object.values(buckets)) {
       bucket.sort((left, right) => {
         const heightDifference = right.localPosition.y - left.localPosition.y;
         if (Math.abs(heightDifference) > 0.001) return heightDifference;
         return right.localPosition.x - left.localPosition.x || left.index - right.index;
       });
+      shuffleInPlace(bucket, random);
     }
 
     const regularQueue = [];
-    const regularOrders = [
-      ["joy", "sadness", "anger", "anxiety"],
-      ["anxiety", "joy", "sadness", "anger"],
-      ["anger", "anxiety", "joy", "sadness"],
-      ["sadness", "anger", "anxiety", "joy"],
-    ];
-    let round = 0;
-    while (DEFAULT_EMOTION_KEYS.some((key) => buckets[key].length)) {
-      for (const key of regularOrders[round % regularOrders.length]) {
-        const record = buckets[key].shift();
-        if (record) regularQueue.push(record);
-      }
-      round += 1;
+    for (const emotion of RELEASE_EMOTION_KEYS) {
+      regularQueue.push(...buckets[emotion]);
     }
 
     const queue = [];
@@ -934,7 +962,7 @@ export class StarBottleScene {
     const depth = Math.max(0.1, maxZ - minZ);
     const centerX = (minX + maxX) * 0.5;
     const centerZ = (minZ + maxZ) * 0.5;
-    const random = seededRandom(59341 + records.length * 313);
+    const random = seededRandom((this.layoutSeed ^ (records.length * 313) ^ 59341) >>> 0);
     let available = targets.map((target) => ({
       target,
       regionNoise: (random() - 0.5) * width * 0.16,
@@ -943,13 +971,12 @@ export class StarBottleScene {
     const buckets = Object.fromEntries(EMOTION_KEYS.map((key) => [key, []]));
     for (const record of records) buckets[record.emotion].push(record);
 
-    const pairByTravel = (bucket, slots) => {
-      bucket.sort((left, right) => left.releaseRank - right.releaseRank);
-      slots.sort(
-        (left, right) =>
-          left.target.z + left.orderNoise - (right.target.z + right.orderNoise),
-      );
-      bucket.forEach((record, index) => assignments.set(record, slots[index].target));
+    const pairWithinRegion = (bucket, slots) => {
+      const shuffledRecords = shuffleInPlace([...bucket], random);
+      const shuffledSlots = shuffleInPlace([...slots], random);
+      shuffledRecords.forEach((record, index) => {
+        assignments.set(record, shuffledSlots[index].target);
+      });
     };
 
     available.sort(
@@ -960,13 +987,13 @@ export class StarBottleScene {
     const customLeft = buckets.custom.filter((record) => record.customPosition !== "right");
     const customRight = buckets.custom.filter((record) => record.customPosition === "right");
     if (customLeft.length) {
-      pairByTravel(customLeft, available.splice(0, customLeft.length));
+      pairWithinRegion(customLeft, available.splice(0, customLeft.length));
     }
     if (buckets.baby.length) {
-      pairByTravel(buckets.baby, available.splice(0, buckets.baby.length));
+      pairWithinRegion(buckets.baby, available.splice(0, buckets.baby.length));
     }
     if (customRight.length) {
-      pairByTravel(
+      pairWithinRegion(
         customRight,
         available.splice(Math.max(0, available.length - customRight.length), customRight.length),
       );
@@ -977,7 +1004,7 @@ export class StarBottleScene {
       const bucket = buckets[key];
       const slots = available.slice(cursor, cursor + bucket.length);
       cursor += bucket.length;
-      pairByTravel(bucket, slots);
+      pairWithinRegion(bucket, slots);
     }
     return assignments;
   }
@@ -995,6 +1022,22 @@ export class StarBottleScene {
       }
       record.targetPosition = nextTarget;
     });
+  }
+
+  _prepareReleasePlan({ refreshSeed = false } = {}) {
+    if (refreshSeed) this.layoutSeed = runtimeSeed();
+    this.releaseQueue = this._buildReleaseQueue(this.records);
+    this.releaseQueue.forEach((record, rank) => {
+      record.releaseRank = rank;
+      record.releaseAt = 1.7 + Math.floor(rank / RELEASE_BATCH_SIZE) * RELEASE_BATCH_INTERVAL;
+    });
+    const galaxyTargets = this._buildGalaxyTargets(this.starCount);
+    const assignments = this._assignGalaxyTargets(this.releaseQueue, galaxyTargets);
+    this.releaseQueue.forEach((record, rank) => {
+      record.targetPosition = assignments.get(record) || galaxyTargets[rank];
+    });
+    this.finalReleaseAt = this.releaseQueue.at(-1)?.releaseAt ?? 1.7;
+    this.releaseCursor = 0;
   }
 
   _createStars(notes) {
@@ -1018,6 +1061,22 @@ export class StarBottleScene {
     this.starMesh.frustumCulled = false;
     this.starMesh.renderOrder = 3;
     this.scene.add(this.starMesh);
+
+    this.statusMarkerMesh = new THREE.InstancedMesh(
+      new THREE.OctahedronGeometry(0.055, 0),
+      new THREE.MeshBasicMaterial({
+        color: 0x9fe0bb,
+        transparent: true,
+        opacity: 0.92,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+      this.starCount,
+    );
+    this.statusMarkerMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.statusMarkerMesh.frustumCulled = false;
+    this.statusMarkerMesh.renderOrder = 6;
+    this.scene.add(this.statusMarkerMesh);
 
     this.selectionHalo = new THREE.Mesh(
       geometry,
@@ -1146,20 +1205,7 @@ export class StarBottleScene {
       this.records.push(record);
     }
 
-    this.releaseQueue = this._buildReleaseQueue(this.records);
-    this.releaseQueue.forEach((record, rank) => {
-      record.releaseRank = rank;
-      record.releaseAt =
-        1.7 + Math.floor(rank / RELEASE_BATCH_SIZE) * RELEASE_BATCH_INTERVAL;
-    });
-    const galaxyTargets = this._buildGalaxyTargets(this.starCount);
-    const targetAssignments = this._assignGalaxyTargets(this.releaseQueue, galaxyTargets);
-    this.releaseQueue.forEach((record, rank) => {
-      record.targetPosition = targetAssignments.get(record) || galaxyTargets[rank];
-    });
-    this.finalReleaseAt = this.releaseQueue.at(-1)?.releaseAt ?? 1.7;
-
-    this.releaseCursor = 0;
+    this._prepareReleasePlan();
     this._rebuildNoteIndex();
     this._refreshStarColors();
     this._syncContainedStars();
@@ -1169,10 +1215,13 @@ export class StarBottleScene {
   _disposeStars() {
     if (!this.starMesh) return;
     this.scene.remove(this.starMesh);
+    this.scene.remove(this.statusMarkerMesh);
     this.scene.remove(this.selectionHalo);
     this.scene.remove(this.selectionRing);
     this.starMesh.geometry.dispose();
     this.starMesh.material.dispose();
+    this.statusMarkerMesh?.geometry.dispose();
+    this.statusMarkerMesh?.material.dispose();
     this.selectionHalo?.material.dispose();
     this.selectionRing?.geometry.dispose();
     this.selectionRing?.material.dispose();
@@ -1182,6 +1231,7 @@ export class StarBottleScene {
       }
     }
     this.starMesh = null;
+    this.statusMarkerMesh = null;
     this.selectionHalo = null;
     this.selectionRing = null;
     this.records.length = 0;
@@ -1206,10 +1256,33 @@ export class StarBottleScene {
     if (!this.initialized) return this.pendingNotes;
 
     const requestedCount = this._resolveStarCount(this.pendingNotes);
-    if (requestedCount !== this.starCount && this.pourState === "sealed") {
+    if (requestedCount !== this.starCount) {
+      const previousPourState = this.pourState;
+      const selectedId = this.records[this.selectedIndex]?.note?.id || null;
       this._disposeStars();
       this.starCount = requestedCount;
       this._createStars(this.pendingNotes);
+      this.hoveredIndex = -1;
+      this.selectedIndex = selectedId && this.noteIndex.has(selectedId)
+        ? this.noteIndex.get(selectedId)
+        : -1;
+      if (previousPourState !== "sealed") {
+        this.releaseCursor = this.releaseQueue.length;
+        for (const record of this.records) this._beginFloatingRecord(record);
+        if (this.world) this.world.gravity.set(0, 0, 0);
+        this._retireBottleColliders();
+        this.bottleGroup.visible = false;
+        this.corkGroup.visible = false;
+        if (this.galaxySurface) {
+          this.galaxySurface.visible = true;
+          this.galaxySurface.material.opacity = 0.13;
+        }
+        this.pourState = "settled";
+        if (previousPourState !== "settled") {
+          this.onPourChange({ phase: "settled", opened: true, progress: 1 });
+        }
+      }
+      this._updateStarMatrices();
       return this.notes;
     }
 
@@ -1223,15 +1296,10 @@ export class StarBottleScene {
       record.customPosition = note.customPosition === "right" ? "right" : "left";
     }
     if (this.pourState === "sealed") {
-      this.releaseQueue = this._buildReleaseQueue(this.records);
-      this.releaseQueue.forEach((record, rank) => {
-        record.releaseRank = rank;
-        record.releaseAt =
-          1.7 + Math.floor(rank / RELEASE_BATCH_SIZE) * RELEASE_BATCH_INTERVAL;
-      });
-      this.finalReleaseAt = this.releaseQueue.at(-1)?.releaseAt ?? 1.7;
+      this._prepareReleasePlan();
+    } else {
+      this._relayoutGalaxyTargets(false);
     }
-    this._relayoutGalaxyTargets(false);
     this._rebuildNoteIndex();
     this._refreshStarColors();
     return this.notes;
@@ -1257,6 +1325,9 @@ export class StarBottleScene {
       if (/^#[0-9a-f]{6}$/i.test(noteColor)) this.tempColor.set(noteColor);
       else this.tempColor.copy(this.emotionColors[record.emotion]);
       if (filteredOut) this.tempColor.lerp(this.filterDimColor, 0.78);
+      if (record.note.changeStatus === "unread" && !filteredOut) {
+        this.tempColor.lerp(this.highlightColor, 0.1);
+      }
       if (index === this.hoveredIndex) this.tempColor.lerp(this.highlightColor, 0.48);
       if (index === this.selectedIndex) this.tempColor.lerp(this.highlightColor, 0.26);
       this.starMesh.setColorAt(index, this.tempColor);
@@ -1517,6 +1588,7 @@ export class StarBottleScene {
     }
     if (this.pourState !== "sealed") return false;
 
+    this._prepareReleasePlan({ refreshSeed: true });
     this.pendingOpen = false;
     this.pourState = "uncorking";
     this.openStartedAt = this.elapsed;
@@ -1652,6 +1724,83 @@ export class StarBottleScene {
       collider.body.quaternion.copy(worldQuaternion);
       collider.body.aabbNeedsUpdate = true;
     }
+  }
+
+  _bottleInnerRadiusAt(localY) {
+    if (localY <= 0.62) return 1.19;
+    if (localY < 1.08) {
+      const shoulder = smoothstep((localY - 0.62) / 0.46);
+      return 1.19 + (1.02 - 1.19) * shoulder;
+    }
+    return 0.91;
+  }
+
+  _constrainPhysicsRecord(record) {
+    const body = record.body;
+    if (!body || this.bottleRetired) return;
+
+    const localPosition = this._physicsLocalPosition
+      .set(body.position.x, body.position.y, body.position.z)
+      .sub(this.bottleGroup.position)
+      .applyQuaternion(this._bottleInverseQuaternion);
+    if (localPosition.y > BOTTLE_MOUTH_Y + 0.2) return;
+
+    let corrected = false;
+    let hitBottom = false;
+    const minimumCenterY = -1.985;
+    if (localPosition.y < minimumCenterY) {
+      localPosition.y = minimumCenterY;
+      corrected = true;
+      hitBottom = true;
+    }
+
+    const radialDistance = Math.hypot(localPosition.x, localPosition.z);
+    const allowedRadius = Math.max(
+      0.7,
+      this._bottleInnerRadiusAt(localPosition.y) - STAR_COLLISION_RADIUS * 1.08,
+    );
+    let normalX = 0;
+    let normalZ = 0;
+    if (radialDistance > allowedRadius) {
+      normalX = localPosition.x / radialDistance;
+      normalZ = localPosition.z / radialDistance;
+      localPosition.x = normalX * allowedRadius;
+      localPosition.z = normalZ * allowedRadius;
+      corrected = true;
+    }
+    if (!corrected) return;
+
+    this._physicsWorldPosition
+      .copy(localPosition)
+      .applyQuaternion(this._bottleWorldQuaternion)
+      .add(this.bottleGroup.position);
+    body.position.set(
+      this._physicsWorldPosition.x,
+      this._physicsWorldPosition.y,
+      this._physicsWorldPosition.z,
+    );
+
+    const localVelocity = this._physicsLocalVelocity
+      .set(body.velocity.x, body.velocity.y, body.velocity.z)
+      .applyQuaternion(this._bottleInverseQuaternion);
+    if (normalX || normalZ) {
+      const outwardSpeed = localVelocity.x * normalX + localVelocity.z * normalZ;
+      if (outwardSpeed > 0) {
+        localVelocity.x -= normalX * outwardSpeed * 1.08;
+        localVelocity.z -= normalZ * outwardSpeed * 1.08;
+      }
+    }
+    if (hitBottom && localVelocity.y < 0) localVelocity.y *= -0.08;
+    this._physicsWorldVelocity
+      .copy(localVelocity)
+      .applyQuaternion(this._bottleWorldQuaternion);
+    body.velocity.set(
+      this._physicsWorldVelocity.x,
+      this._physicsWorldVelocity.y,
+      this._physicsWorldVelocity.z,
+    );
+    body.aabbNeedsUpdate = true;
+    body.wakeUp();
   }
 
   _retireBottleColliders() {
@@ -1847,8 +1996,17 @@ export class StarBottleScene {
   }
 
   _updateStarMotion() {
+    const constrainToBottle =
+      this.world && !this.bottleRetired && this.pourState !== "sealed";
+    if (constrainToBottle) {
+      this.bottleGroup.updateMatrixWorld(true);
+      this.bottleGroup.getWorldQuaternion(this._bottleWorldQuaternion);
+      this._bottleInverseQuaternion.copy(this._bottleWorldQuaternion).invert();
+    }
+
     for (const record of this.records) {
       if (record.state === "physics") {
+        if (constrainToBottle) this._constrainPhysicsRecord(record);
         if (record.body) {
           const velocity = record.body.velocity;
           const speedSquared =
@@ -1929,7 +2087,7 @@ export class StarBottleScene {
     if (!floating.length) return;
 
     const step = clamp(delta, 0.001, 0.045);
-    const damping = Math.exp(-4.8 * step);
+    const damping = Math.exp(-4.1 * step);
     const pointer = this.pointerWorld;
     const interactionPointer =
       this.isDragging && this.dragMode === "star" ? pointer : null;
@@ -1964,7 +2122,7 @@ export class StarBottleScene {
         desiredX - record.position.x,
         desiredZ - record.position.z,
       );
-      const springStrength = 4.2 + Math.min(2.6, returnDistance * 0.85);
+      const springStrength = 3.65 + Math.min(2.35, returnDistance * 0.78);
       const springX = (desiredX - record.position.x) * springStrength;
       const springZ = (desiredZ - record.position.z) * springStrength;
       record.floatVelocity.x += springX * step;
@@ -1976,9 +2134,13 @@ export class StarBottleScene {
         const distanceSquared = dx * dx + dz * dz;
         if (distanceSquared < pointerRadiusSquared) {
           const distance = Math.sqrt(distanceSquared) || 0.001;
-          const strength = (1 - distance / FLOAT_POINTER_RADIUS) * 3.1;
+          const influence = 1 - distance / FLOAT_POINTER_RADIUS;
+          const strength = (influence * 1.5 + influence * influence * 4.4);
           record.floatVelocity.x += (dx / distance) * strength * step;
           record.floatVelocity.z += (dz / distance) * strength * step;
+          const swirl = Math.sin(phase + distance * 5.2) * influence * 0.42;
+          record.floatVelocity.x += (-dz / distance) * swirl * step;
+          record.floatVelocity.z += (dx / distance) * swirl * step;
         }
       }
 
@@ -1989,7 +2151,7 @@ export class StarBottleScene {
       const horizontalSpeed = Math.hypot(record.floatVelocity.x, record.floatVelocity.z);
       const speedLimit = Math.min(
         FLOAT_RETURN_MAX_SPEED,
-        0.34 + returnDistance * 0.48,
+        0.42 + returnDistance * 0.62,
       );
       if (horizontalSpeed > speedLimit) {
         const speedScale = speedLimit / horizontalSpeed;
@@ -2018,16 +2180,16 @@ export class StarBottleScene {
     // already have clearance; these passes preserve it during dragging.
     const minimumDistance = FLOAT_COLLISION_DISTANCE;
     const minimumDistanceSquared = minimumDistance * minimumDistance;
-    for (let iteration = 0; iteration < 3; iteration += 1) {
+    const influenceDistance = FLOAT_NEIGHBOR_INFLUENCE_DISTANCE;
+    const influenceDistanceSquared = influenceDistance * influenceDistance;
+    for (let iteration = 0; iteration < 4; iteration += 1) {
       for (let first = 0; first < floating.length; first += 1) {
-          const left = floating[first];
+        const left = floating[first];
         for (let second = first + 1; second < floating.length; second += 1) {
           const right = floating[second];
           let dx = right.position.x - left.position.x;
           let dz = right.position.z - left.position.z;
           let distanceSquared = dx * dx + dz * dz;
-          if (distanceSquared >= minimumDistanceSquared) continue;
-
           if (distanceSquared < 0.000001) {
             const angle = (left.index * 0.61803398875 + right.index * 0.41421356237) * Math.PI;
             dx = Math.cos(angle) * 0.001;
@@ -2042,6 +2204,43 @@ export class StarBottleScene {
           const rightDragged = this.isDragging && right.index === this.draggedStarIndex;
           const leftPinned = leftDragged || (left.frozen && left.index === this.hoveredIndex);
           const rightPinned = rightDragged || (right.frozen && right.index === this.hoveredIndex);
+          const relativeVelocity =
+            (right.floatVelocity.x - left.floatVelocity.x) * normalX +
+            (right.floatVelocity.z - left.floatVelocity.z) * normalZ;
+
+          if (iteration === 0 && distanceSquared < influenceDistanceSquared) {
+            const leftSpeed = Math.hypot(left.floatVelocity.x, left.floatVelocity.z);
+            const rightSpeed = Math.hypot(right.floatVelocity.x, right.floatVelocity.z);
+            const wakeSpeed = Math.max(leftSpeed, rightSpeed);
+            if (wakeSpeed > FLOAT_NEIGHBOR_WAKE_MIN_SPEED || relativeVelocity < -0.01) {
+              const influence = smoothstep(1 - distance / influenceDistance);
+              const wakeImpulse =
+                (Math.max(0, -relativeVelocity) * 0.38 + wakeSpeed * 0.075) * influence;
+              if (!leftPinned) {
+                left.floatVelocity.x -= normalX * wakeImpulse;
+                left.floatVelocity.z -= normalZ * wakeImpulse;
+              }
+              if (!rightPinned) {
+                right.floatVelocity.x += normalX * wakeImpulse;
+                right.floatVelocity.z += normalZ * wakeImpulse;
+              }
+
+              const transfer = influence * 0.055;
+              const transferX = (left.floatVelocity.x - right.floatVelocity.x) * transfer;
+              const transferZ = (left.floatVelocity.z - right.floatVelocity.z) * transfer;
+              if (!leftPinned) {
+                left.floatVelocity.x -= transferX;
+                left.floatVelocity.z -= transferZ;
+              }
+              if (!rightPinned) {
+                right.floatVelocity.x += transferX;
+                right.floatVelocity.z += transferZ;
+              }
+            }
+          }
+
+          if (distanceSquared >= minimumDistanceSquared) continue;
+
           if (leftPinned && rightPinned) {
             continue;
           } else if (leftPinned) {
@@ -2058,11 +2257,8 @@ export class StarBottleScene {
             right.position.z += normalZ * correction;
           }
 
-          const relativeVelocity =
-            (right.floatVelocity.x - left.floatVelocity.x) * normalX +
-            (right.floatVelocity.z - left.floatVelocity.z) * normalZ;
           if (relativeVelocity < 0) {
-            const impulse = relativeVelocity * 0.24;
+            const impulse = relativeVelocity * 0.36;
             if (!leftPinned) {
               left.floatVelocity.x += normalX * impulse;
               left.floatVelocity.z += normalZ * impulse;
@@ -2080,6 +2276,7 @@ export class StarBottleScene {
   _updateStarMatrices() {
     if (!this.starMesh) return;
     const dummy = this.instanceDummy;
+    const statusMarker = this.statusMarkerDummy;
     if (this.selectionHalo) this.selectionHalo.visible = false;
     if (this.selectionRing) this.selectionRing.visible = false;
     for (let index = 0; index < this.records.length; index += 1) {
@@ -2097,8 +2294,9 @@ export class StarBottleScene {
         dummy.quaternion.copy(record.quaternion);
       }
 
+      const filteredOut = this.emotionFilter && record.emotion !== this.emotionFilter;
       let scale = STAR_SCALE;
-      if (this.emotionFilter && record.emotion !== this.emotionFilter) scale *= 0.34;
+      if (filteredOut) scale *= 0.34;
       if (index === this.hoveredIndex) scale *= 1.04;
       if (index === this.selectedIndex) {
         scale *= 1.08;
@@ -2107,6 +2305,27 @@ export class StarBottleScene {
       dummy.scale.setScalar(scale);
       dummy.updateMatrix();
       this.starMesh.setMatrixAt(index, dummy.matrix);
+
+      statusMarker.position.copy(dummy.position);
+      if (record.note.changeStatus === "unread") {
+        const visualScale = scale / STAR_SCALE;
+        const markerOffset = 0.105 * Math.max(0.48, visualScale);
+        const pulse = 0.9 + Math.sin(this.elapsed * 2.8 + index * 0.71) * 0.12;
+        statusMarker.position.x += markerOffset;
+        statusMarker.position.y += markerOffset * 0.92;
+        statusMarker.position.z += 0.055;
+        statusMarker.rotation.set(
+          this.elapsed * 0.7 + index * 0.11,
+          this.elapsed * 1.15 + index * 0.23,
+          this.elapsed * 0.42,
+        );
+        statusMarker.scale.setScalar(pulse * (filteredOut ? 0.42 : 1));
+      } else {
+        statusMarker.quaternion.identity();
+        statusMarker.scale.setScalar(0);
+      }
+      statusMarker.updateMatrix();
+      this.statusMarkerMesh.setMatrixAt(index, statusMarker.matrix);
 
       if (index === this.selectedIndex && this._isStarPickable(index)) {
         const pulse = 1 + Math.sin(this.elapsed * 3.1) * 0.035;
@@ -2124,6 +2343,7 @@ export class StarBottleScene {
       }
     }
     this.starMesh.instanceMatrix.needsUpdate = true;
+    this.statusMarkerMesh.instanceMatrix.needsUpdate = true;
   }
 
   _selectIndex(index, source = "programmatic") {
@@ -2238,6 +2458,7 @@ export class StarBottleScene {
       bottleEmpty: bottleCount === 0,
       escaped: states.exiting + states.galaxy + states.floating,
       dynamic: states.physics,
+      layoutSeed: this.layoutSeed,
       states,
     };
     if (includePositions) {
@@ -2334,7 +2555,7 @@ export class StarBottleScene {
     this._syncBottleColliders();
     this._syncContainedStars();
     this._activateDueStars();
-    if (this.world) this.world.step(1 / 60, delta, 3);
+    if (this.world) this.world.step(1 / 90, delta, 5);
     this._updateStarMotion();
     this._updatePointerWorld();
     this._updateHover();
