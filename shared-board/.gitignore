@@ -3,3 +3,7 @@
 public-url.txt
 data/settings.json
 OWNER-ACCESS.txt
+.env
+.env.*
+!.env.example
+node_modules/

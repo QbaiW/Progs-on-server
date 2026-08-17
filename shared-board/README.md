@@ -39,3 +39,7 @@ Public URL: https://...trycloudflare.com
 - 若需要电脑关机后仍长期在线，需要部署到云服务器或长期通电的设备。
 - 首次启动需要联网下载约定版本的 3D 与物理引擎，之后从本地文件加载。
 - 任何拿到公网网址的人都能阅读纸条，请不要写入敏感信息。
+
+## 云服务器部署
+
+项目已附带 `ecosystem.config.cjs`、`.env.example`、`start-linux.sh` 和 `BAOTA-DEPLOY.md`。部署到宝塔时使用 Node.js 20/22 + PM2 + Nginx 反向代理，不需要上传 `cloudflared.exe`。详细步骤请查看 `BAOTA-DEPLOY.md`。

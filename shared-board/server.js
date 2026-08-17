@@ -6,7 +6,9 @@ const crypto = require("node:crypto");
 const ROOT = __dirname;
 const DEFAULT_PUBLIC_DIR = path.join(ROOT, "public");
 const DEFAULT_DATA_DIR = process.env.BOARD_DATA_DIR || path.join(ROOT, "data");
-const DEFAULT_HOST = process.env.HOST || "0.0.0.0";
+// Keep the app private when it is placed behind BaoTa/Nginx. Override HOST
+// explicitly when a direct LAN/public bind is intentionally needed.
+const DEFAULT_HOST = process.env.HOST || "127.0.0.1";
 const DEFAULT_PORT = Number(process.env.PORT || 8787);
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_NOTE_LENGTH = 2000;
@@ -433,12 +435,17 @@ function readFavorites(favoritesFile) {
 }
 
 function readSettings(settingsFile, passwordOverride) {
-  const raw = JSON.parse(fs.readFileSync(settingsFile, "utf8"));
+  let raw = {};
+  try {
+    raw = JSON.parse(fs.readFileSync(settingsFile, "utf8"));
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
   const password = passwordOverride || process.env.OWNER_PASSWORD || raw.ownerPassword;
   if (typeof password !== "string" || password.length < 6) {
-    throw new Error("data/settings.json must contain an ownerPassword of at least 6 characters");
+    throw new Error("Set OWNER_PASSWORD or provide data/settings.json with an ownerPassword of at least 6 characters");
   }
-  const configuredHours = Number(raw.sessionHours);
+  const configuredHours = Number(process.env.SESSION_HOURS || raw.sessionHours);
   return {
     ownerPassword: password,
     sessionHours: Number.isFinite(configuredHours)
@@ -624,6 +631,15 @@ function createStarBottleServer(options = {}) {
   }
 
   async function handleApi(request, response, pathname) {
+    if (pathname === "/api/health" && request.method === "GET") {
+      writeJson(response, 200, {
+        ok: true,
+        service: "star-bottle",
+        uptimeSeconds: Math.floor(process.uptime()),
+      });
+      return true;
+    }
+
     if (pathname === "/api/notes" && request.method === "GET") {
       writeJson(response, 200, notesDocument);
       return true;

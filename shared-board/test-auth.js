@@ -46,13 +46,12 @@ test("viewers are read-only and an authenticated owner can edit a note", async (
     JSON.stringify({ ...source, notes: source.notes.slice(0, 4) }, null, 2),
     "utf8",
   );
-  fs.writeFileSync(
-    path.join(temporaryDirectory, "settings.json"),
-    JSON.stringify({ ownerPassword: TEST_PASSWORD, sessionHours: 1 }, null, 2),
-    "utf8",
-  );
 
-  const server = createStarBottleServer({ dataDir: temporaryDirectory, watch: false });
+  const server = createStarBottleServer({
+    dataDir: temporaryDirectory,
+    ownerPassword: TEST_PASSWORD,
+    watch: false,
+  });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
@@ -69,6 +68,11 @@ test("viewers are read-only and an authenticated owner can edit a note", async (
   const publicRead = await requestJson(baseUrl, "/api/notes");
   assert.equal(publicRead.status, 200);
   assert.equal(publicRead.body.notes.length, 4);
+
+  const health = await requestJson(baseUrl, "/api/health");
+  assert.equal(health.status, 200);
+  assert.equal(health.body.ok, true);
+  assert.equal(health.body.service, "star-bottle");
 
   const publicActivity = await requestJson(baseUrl, "/api/activity/open", {
     method: "POST",

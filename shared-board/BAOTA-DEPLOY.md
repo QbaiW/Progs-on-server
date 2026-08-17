@@ -1,0 +1,103 @@
+# 宝塔部署说明
+
+## 1. 准备项目
+
+建议把整个 `shared-board` 文件夹上传到：
+
+```text
+/www/wwwroot/qe-star-bottle
+```
+
+可以不上传 `cloudflared.exe`、`*.ps1`、`*.cmd`、`*.log` 和 `public-url.txt`。不要删除 `data` 文件夹；其中保存纸条、收藏、访问记录和主人设备名单。
+
+## 2. 安装 Node.js 和 PM2
+
+在宝塔软件商店安装 Node.js 版本管理器，选择 Node.js 20 或 22。然后在宝塔终端执行：
+
+```bash
+cd /www/wwwroot/qe-star-bottle
+npm install --omit=dev
+npm install -g pm2
+```
+
+如果服务器没有编译工具，当前项目不需要编译原生模块；`three` 和 `cannon-es` 的浏览器文件已经放在 `public/vendor` 中。
+
+## 3. 设置生产环境变量
+
+在宝塔文件管理器新建 `/www/wwwroot/qe-star-bottle/.env`，内容如下。把密码换成新的长密码，不建议继续使用简单数字密码：
+
+```dotenv
+NODE_ENV=production
+HOST=127.0.0.1
+PORT=8787
+BOARD_DATA_DIR=/www/wwwroot/qe-star-bottle/data
+OWNER_PASSWORD=replace-with-a-long-random-password
+SESSION_HOURS=12
+```
+
+`.env` 已加入 `.gitignore`，不要把真实密码提交到 Git 或发到聊天里。设置了 `OWNER_PASSWORD` 和 `SESSION_HOURS` 后，生产环境不依赖 `data/settings.json` 中的密码；已有的设置文件仍可继续保留。
+
+## 4. 启动并设置自动重启
+
+在项目目录执行：
+
+```bash
+cd /www/wwwroot/qe-star-bottle
+pm2 delete qe-star-bottle 2>/dev/null || true
+pm2 start ecosystem.config.cjs
+pm2 save
+pm2 startup
+```
+
+`pm2 startup` 会打印一条需要复制并执行的命令。执行那条命令后，再运行：
+
+```bash
+pm2 save
+curl http://127.0.0.1:8787/api/health
+```
+
+看到 `"ok":true` 才继续配置域名。查看日志使用：
+
+```bash
+pm2 logs qe-star-bottle --lines 100
+```
+
+## 5. 在宝塔添加网站和 HTTPS
+
+在“网站”中添加你的域名，例如 `star.example.com`。网站根目录可以填写项目目录，但公网请求必须通过反向代理转发给 Node；不要把 `data` 目录单独作为网站根目录。
+
+在“反向代理”中新增：
+
+```text
+目标 URL: http://127.0.0.1:8787
+发送域名: $host
+```
+
+打开高级配置，将 `nginx-star-bottle.conf.example` 中的 `proxy_http_version`、转发请求头、`proxy_buffering off`、`proxy_cache off`、`proxy_read_timeout 3600s` 和 `proxy_send_timeout 3600s` 加入代理配置。SSE 如果出现“已断开”或无法实时同步，优先检查这些配置。
+
+随后在宝塔“SSL”中申请并启用证书，再打开强制 HTTPS。HTTPS 很重要，因为主人登录使用 HttpOnly Cookie，公网环境不应使用明文 HTTP。
+
+## 6. 防火墙
+
+宝塔和云服务器安全组只开放 `80`、`443`，以及必要的 `22`。不要开放 `8787`，因为 Node 已绑定到 `127.0.0.1`，外部只能通过 Nginx 访问。
+
+## 7. 数据备份
+
+升级或迁移前备份整个 `data` 文件夹。至少包含：
+
+```text
+data/notes.json
+data/favorites.json
+data/activity.json
+data/owner-devices.json
+data/settings.json
+```
+
+更新代码后执行：
+
+```bash
+cd /www/wwwroot/qe-star-bottle
+npm install --omit=dev
+pm2 restart qe-star-bottle --update-env
+curl http://127.0.0.1:8787/api/health
+```

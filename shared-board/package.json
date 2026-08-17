@@ -5,7 +5,11 @@
   "description": "Interactive 3D origami star bottle",
   "scripts": {
     "start": "node server.js",
+    "start:production": "node server.js",
     "test": "node --test test-auth.js"
+  },
+  "engines": {
+    "node": ">=18.18.0"
   },
   "dependencies": {
     "cannon-es": "0.20.0",
