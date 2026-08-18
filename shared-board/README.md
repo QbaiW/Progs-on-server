@@ -2,6 +2,12 @@
 
 一个全屏 3D 折纸星星瓶网站。普通访问者只能阅读和收藏纸条，主人登录后才能修改纸条内容。
 
+## 本地运行
+
+先在项目上一级目录双击 `PULL-SERVER-DATA.cmd`，把服务器数据下载到 `server-data\from-server`。然后双击本目录的 `START-LOCAL.cmd`，浏览器访问 `http://localhost:8787/`。
+
+本地服务只读写下载的数据副本，不会直接修改云服务器。需要把本地数据传回服务器时，再运行 `PUSH-SERVER-DATA.cmd`。前端代码和音乐文件不需要编译，修改后刷新浏览器即可；修改 `server.js` 后需要关闭并重新运行本地服务。
+
 ## 启动公网网站
 
 双击 `START-PUBLIC.cmd`。首次启动会自动下载固定版本的 Three.js 和 Cannon ES，然后显示：
