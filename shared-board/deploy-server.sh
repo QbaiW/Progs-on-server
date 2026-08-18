@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -Eeuo pipefail
+set -Eeo pipefail
 
 # The Git checkout contains code. Runtime JSON data is kept outside Git.
 REPO_ROOT="${QE_REPO_ROOT:-/www/wwwroot/qe-star-bottle}"
@@ -9,7 +9,10 @@ APP_NAME="${QE_PM2_APP:-qe-star-bottle}"
 LOCK_FILE="${QE_DEPLOY_LOCK:-/tmp/qe-star-bottle-deploy.lock}"
 ALLOW_DATA_CHANGES="${QE_ALLOW_DATA_CHANGES:-0}"
 
+# Some server profiles reference optional variables. Source them before
+# enabling nounset so a harmless shell customization cannot stop deployment.
 [ -f /etc/profile ] && . /etc/profile || true
+set -u
 
 if command -v flock >/dev/null 2>&1; then
   exec 9>"$LOCK_FILE"
@@ -65,5 +68,15 @@ if [[ "$needs_install" == true || ! -d node_modules ]]; then
 fi
 
 pm2 restart "$APP_NAME" --update-env
-health="$(curl --fail --silent --show-error --max-time 15 http://127.0.0.1:8787/api/health)"
+health=""
+for attempt in {1..15}; do
+  if health="$(curl --fail --silent --show-error --max-time 5 http://127.0.0.1:8787/api/health 2>/dev/null)"; then
+    break
+  fi
+  sleep 1
+done
+[ -n "$health" ] || {
+  printf '[deploy] health check failed after restart\n' >&2
+  exit 1
+}
 printf '[deploy] %s\n' "$health"
