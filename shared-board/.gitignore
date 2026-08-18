@@ -2,6 +2,9 @@
 *.pid
 public-url.txt
 data/settings.json
+# Runtime data stays on the server and is pulled separately.
+data/*.json
+!data/.gitkeep
 OWNER-ACCESS.txt
 .env
 .env.*

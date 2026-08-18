@@ -1,0 +1,6 @@
+# Runtime data pulled from the server. Never commit local copies or backups.
+/server-data/
+
+# Generated deployment bundles may contain runtime data or server-only files.
+/deploy-package-*/
+/qe-star-bottle-deploy-*.zip
