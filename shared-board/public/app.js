@@ -1,4 +1,6 @@
-import { StarBottleScene } from "/scene.js?v=20260817-custom10";
+import { StarBottleScene } from "/scene.js?v=20260819-pet16";
+import PetView from "/pet-view.js?v=20260819-pet16";
+import { PetController } from "/pet-controller.js?v=20260819-pet16";
 
 const EMOTIONS = {
   joy: { label: "开心", color: "#ff863e", level: 1 },
@@ -15,6 +17,7 @@ const MUSIC_SETTINGS_KEY = "star-bottle-music-settings-v1";
 
 const elements = {
   canvas: document.querySelector("#starCanvas"),
+  petLayer: document.querySelector("#petLayer"),
   loadingLayer: document.querySelector("#loadingLayer"),
   loadingText: document.querySelector("#loadingText"),
   syncState: document.querySelector("#syncState"),
@@ -35,6 +38,7 @@ const elements = {
   favoritesList: document.querySelector("#favoritesList"),
   emptyFavorites: document.querySelector("#emptyFavorites"),
   noteLayer: document.querySelector("#noteLayer"),
+  unfoldedNote: document.querySelector("#unfoldedNote"),
   noteBackdrop: document.querySelector("#noteBackdrop"),
   paperShape: document.querySelector("#paperShape"),
   noteCopy: document.querySelector("#noteCopy"),
@@ -96,6 +100,8 @@ const state = {
   selectedNote: null,
   editorNote: null,
   scene: null,
+  pet: null,
+  lastPetActivityAt: 0,
   triggerClicks: [],
   activeEmotion: null,
   activityEntries: [],
@@ -277,8 +283,36 @@ function showToast(message) {
 }
 
 function setPanel(panel, open) {
+  if (!panel) return;
   panel.classList.toggle("open", open);
   panel.setAttribute("aria-hidden", String(!open));
+  state.pet?.handleEvent("userActivity", {
+    type: "panel",
+    blocked: Boolean(
+      elements.noteLayer?.classList.contains("open") ||
+      elements.favoritesPanel?.classList.contains("open") ||
+      elements.editorPanel?.classList.contains("open") ||
+      elements.ownerLogin?.open,
+    ),
+  });
+}
+
+function forwardPetActivity(event, type = "pointer") {
+  if (!state.pet) return;
+  const now = Date.now();
+  if (type === "pointermove" && now - state.lastPetActivityAt < 80) return;
+  state.lastPetActivityAt = now;
+  state.pet.handleEvent("userActivity", {
+    type,
+    x: Number.isFinite(event?.clientX) ? event.clientX : undefined,
+    y: Number.isFinite(event?.clientY) ? event.clientY : undefined,
+    blocked: Boolean(
+      elements.noteLayer?.classList.contains("open") ||
+      elements.favoritesPanel?.classList.contains("open") ||
+      elements.editorPanel?.classList.contains("open") ||
+      elements.ownerLogin?.open,
+    ),
+  });
 }
 
 function setMusicPopover(open) {
@@ -512,7 +546,7 @@ async function loadSharedFavorites() {
   markFavoritesMigrationFinished();
 }
 
-function installNotes(notes) {
+function installNotes(notes, meta = {}) {
   const editingId = state.editorNote?.id;
   const selectedId = state.selectedNote?.id;
   state.notes = notes;
@@ -573,6 +607,11 @@ function installNotes(notes) {
     // must not be reported as a save failure.
     console.error("Could not refresh the 3D stars:", error);
   }
+  state.pet?.handleEvent("notesSnapshot", {
+    notes,
+    version: meta.version,
+    initial: meta.initial === true,
+  });
 }
 
 function installNotePatch(note) {
@@ -655,12 +694,18 @@ function openNote(note, detail = {}) {
   updateNoteFavoriteButton();
   elements.noteLayer.classList.add("open");
   elements.noteLayer.setAttribute("aria-hidden", "false");
+  state.pet?.handleEvent("noteOpen", {
+    note: state.selectedNote,
+    detail: { ...detail, element: elements.unfoldedNote },
+  });
 }
 
 function closeNote() {
+  const closedId = state.selectedNote?.id || null;
   elements.noteLayer.classList.remove("open");
   elements.noteLayer.setAttribute("aria-hidden", "true");
   state.selectedNote = null;
+  state.pet?.handleEvent("noteClose", closedId);
 }
 
 function updateNoteFavoriteButton() {
@@ -697,6 +742,12 @@ async function toggleSelectedFavorite() {
       throw new Error("服务器没有确认收藏状态");
     }
     installFavorites(result.document);
+    state.pet?.handleEvent("favoriteConfirmed", {
+      noteId: id,
+      note: state.noteById.get(id),
+      favorite,
+      confirmed: true,
+    });
     showToast(favorite ? "已收藏并同步到所有设备" : "已取消收藏并同步");
   } catch (error) {
     let restoredFromServer = false;
@@ -1290,8 +1341,18 @@ async function deleteEditorNote() {
 
 function connectUpdates() {
   const events = new EventSource("/api/events");
+  // Every EventSource connection starts with a complete notes snapshot. Treat
+  // that first message as a baseline so reconnects cannot replay P0 alerts.
+  let baselinePending = true;
   events.addEventListener("notes", (event) => {
-    try { installNotes(normalizeNotes(JSON.parse(event.data))); } catch { /* keep current data */ }
+    try {
+      const payload = JSON.parse(event.data);
+      installNotes(normalizeNotes(payload), {
+        version: payload?.version,
+        initial: baselinePending,
+      });
+      baselinePending = false;
+    } catch { /* keep current data */ }
   });
   events.addEventListener("favorites", (event) => {
     try { installFavorites(JSON.parse(event.data)); } catch { /* keep current favorites */ }
@@ -1319,7 +1380,10 @@ function bindUi() {
   });
   document.addEventListener("pointerdown", (event) => {
     if (!elements.musicPlayer.contains(event.target)) setMusicPopover(false);
+    forwardPetActivity(event, "pointerdown");
   });
+  document.addEventListener("pointermove", (event) => forwardPetActivity(event, "pointermove"), { passive: true });
+  document.addEventListener("keydown", (event) => forwardPetActivity(event, "keydown"), { passive: true });
   elements.favoritesButton.addEventListener("click", () => setPanel(elements.favoritesPanel, true));
   elements.closeFavorites.addEventListener("click", () => setPanel(elements.favoritesPanel, false));
   elements.noteBackdrop.addEventListener("click", closeNote);
@@ -1418,7 +1482,11 @@ async function start() {
   try {
     const response = await fetch("/api/notes", { cache: "no-store" });
     if (!response.ok) throw new Error("无法读取纸条");
-    installNotes(normalizeNotes(await response.json()));
+    const initialPayload = await response.json();
+    installNotes(normalizeNotes(initialPayload), {
+      version: initialPayload?.version,
+      initial: true,
+    });
     loadSharedFavorites().catch((error) => {
       updateFavoriteUi();
       showToast(`共享收藏暂时无法连接：${error.message}`);
@@ -1428,11 +1496,35 @@ async function start() {
       canvas: elements.canvas,
       notes: state.notes,
       onSelect: openNote,
-      onPour: () => elements.emotionBubbles.classList.add("visible"),
+      onPourChange: (detail) => {
+        if (detail?.opened) elements.emotionBubbles.classList.add("visible");
+        state.pet?.handleEvent("scenePourChanged", detail);
+      },
       onBubblePositions: positionBubbles,
+      onStarDragStart: (detail) => state.pet?.handleEvent("onStarDragStart", detail),
+      onStarDragMove: (detail) => state.pet?.handleEvent("onStarDragMove", detail),
+      onStarDragEnd: (detail) => state.pet?.handleEvent("onStarDragEnd", detail),
     });
     if (typeof state.scene.init === "function") await state.scene.init();
     else await state.scene.ready;
+    state.pet = new PetController({
+      scene: state.scene,
+      view: new PetView({ layer: elements.petLayer }),
+      onStateChange: ({ state: petState }) => {
+        if (elements.petLayer) elements.petLayer.dataset.state = petState;
+      },
+    });
+    if (elements.petLayer) elements.petLayer.dataset.state = state.pet.stateId;
+    globalThis.__STAR_BOTTLE_PET__ = state.pet;
+    state.pet.handleEvent("notesSnapshot", {
+      notes: state.notes,
+      version: initialPayload?.version,
+      initial: true,
+    });
+    state.pet.handleEvent("scenePourChanged", {
+      phase: state.scene.pourState,
+      settled: state.scene.pourState === "settled",
+    });
     elements.loadingLayer.classList.add("hidden");
     setSync("只读浏览", "ready");
     connectUpdates();
@@ -1441,5 +1533,10 @@ async function start() {
     setSync("载入失败", "error");
   }
 }
+
+window.addEventListener("pagehide", () => {
+  try { state.pet?.destroy?.(); } catch { /* teardown is best effort */ }
+  try { state.scene?.destroy?.(); } catch { /* teardown is best effort */ }
+}, { once: true });
 
 start();

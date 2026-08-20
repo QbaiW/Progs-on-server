@@ -145,6 +145,9 @@ export class StarBottleScene {
       options.onPourChange || options.onPour || options.onOpen || (() => {});
     this.onEmotionAnchors =
       options.onEmotionAnchors || options.onBubblePositions || options.onBubbleAnchors || null;
+    this.onStarDragStart = options.onStarDragStart || (() => {});
+    this.onStarDragMove = options.onStarDragMove || (() => {});
+    this.onStarDragEnd = options.onStarDragEnd || (() => {});
 
     if (!this.canvas) throw new Error("StarBottleScene requires a canvas element.");
 
@@ -190,6 +193,27 @@ export class StarBottleScene {
     this.dragMode = null;
     this.pressedTarget = null;
     this.draggedStarIndex = -1;
+    this.dragStarted = false;
+    this.dragInitialPosition = null;
+    this.starDragEnabled = true;
+    this.interactionLocked = false;
+    this.visualClaims = new Map();
+    this.heartArrayOverride = null;
+    // The pet is rendered as a 2D sprite, but its anchor lives on the same
+    // galaxy ground plane as the stars.  Keeping this state in the scene
+    // lets the regular floating-field collision pass push stars around it.
+    this.petWorldPosition = null;
+    this.petWorldVelocity = null;
+    this.petCollisionRadius = 0.34;
+    this.petCollisionEnabled = false;
+    this.petPositionUpdatedAt = 0;
+    this.petSprite = null;
+    this.petSpriteVisible = false;
+    this.petSpritePose = "idle";
+    this.petSpriteWalking = false;
+    this.petSpriteDirection = "right";
+    this.petTextureCache = new Map();
+    this.petTextureRequest = 0;
     this.pointerType = "mouse";
     this.bottleRetired = false;
     const configuredLayoutSeed = Number(options.layoutSeed);
@@ -299,6 +323,7 @@ export class StarBottleScene {
     this._physicsWorldPosition = new THREE.Vector3();
     this._physicsLocalVelocity = new THREE.Vector3();
     this._physicsWorldVelocity = new THREE.Vector3();
+    this.petWorldVelocity = new THREE.Vector3();
 
     this.scene.add(new THREE.HemisphereLight(0xb8c9ff, 0x170e10, 1.55));
     this.scene.add(new THREE.AmbientLight(0xffead3, 1.65));
@@ -314,6 +339,85 @@ export class StarBottleScene {
     const rimLight = new THREE.DirectionalLight(0xffffff, 2.25);
     rimLight.position.set(-4.5, 5.8, 4.2);
     this.scene.add(rimLight);
+
+    this._createPetSprite();
+  }
+
+  _createPetSprite() {
+    const THREE = this.THREE;
+    this.petTextureLoader = new THREE.TextureLoader();
+    const material = new THREE.SpriteMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 1,
+      alphaTest: 0.025,
+      depthTest: true,
+      depthWrite: false,
+    });
+    this.petSprite = new THREE.Sprite(material);
+    this.petSprite.name = "galaxy-pet";
+    this.petSprite.visible = false;
+    this.petSprite.renderOrder = 4;
+    this.petSprite.scale.set(0.76, 0.76, 1);
+    this.scene.add(this.petSprite);
+    this.setPetSpritePose("idle", "/pet/idle.png");
+  }
+
+  setPetSpritePose(pose = "idle", assetUrl = "") {
+    this.petSpritePose = String(pose || "idle");
+    const url = String(assetUrl || "").trim();
+    if (!url || !this.petTextureLoader || !this.petSprite?.material) return false;
+    const request = ++this.petTextureRequest;
+    const install = (texture) => {
+      if (!texture || request !== this.petTextureRequest || !this.petSprite?.material) return;
+      if (this.THREE.SRGBColorSpace) texture.colorSpace = this.THREE.SRGBColorSpace;
+      texture.needsUpdate = true;
+      this.petSprite.material.map = texture;
+      this.petSprite.material.needsUpdate = true;
+    };
+    const cached = this.petTextureCache.get(url);
+    if (cached) {
+      install(cached);
+      return true;
+    }
+    this.petTextureLoader.load(url, (texture) => {
+      this.petTextureCache.set(url, texture);
+      install(texture);
+    }, undefined, () => {});
+    return true;
+  }
+
+  setPetSpriteVisible(visible = true) {
+    this.petSpriteVisible = Boolean(visible);
+    if (this.petSprite) this.petSprite.visible = this.petSpriteVisible && Boolean(this.petWorldPosition);
+    return this.petSpriteVisible;
+  }
+
+  setPetWalking(active = false, direction = "right") {
+    this.petSpriteWalking = Boolean(active);
+    this.petSpriteDirection = String(direction).toLowerCase() === "left" ? "left" : "right";
+    return this.petSpriteWalking;
+  }
+
+  _updatePetSprite() {
+    if (!this.petSprite || !this.petWorldPosition) return;
+    const baseWidth = 0.76;
+    const baseHeight = 0.76;
+    const phase = this.elapsed * 12;
+    const bob = this.petSpriteWalking ? Math.abs(Math.sin(phase)) * 0.055 : 0;
+    const squash = this.petSpriteWalking ? Math.sin(phase * 2) * 0.018 : 0;
+    this.petSprite.position.set(
+      this.petWorldPosition.x,
+      this.petWorldPosition.y + baseHeight * 0.5 + bob,
+      this.petWorldPosition.z,
+    );
+    this.petSprite.scale.set(
+      (this.petSpriteDirection === "left" ? -1 : 1) * (baseWidth + squash),
+      baseHeight - squash,
+      1,
+    );
+    this.petSprite.material.rotation = this.petSpriteWalking ? Math.sin(phase) * 0.035 : 0;
+    this.petSprite.visible = this.petSpriteVisible;
   }
 
   _setupWorld() {
@@ -1213,6 +1317,8 @@ export class StarBottleScene {
   }
 
   _disposeStars() {
+    this.visualClaims.clear();
+    this.heartArrayOverride = null;
     if (!this.starMesh) return;
     this.scene.remove(this.starMesh);
     this.scene.remove(this.statusMarkerMesh);
@@ -1237,6 +1343,24 @@ export class StarBottleScene {
     this.records.length = 0;
     this.releaseQueue.length = 0;
     this.noteIndex.clear();
+  }
+
+  _pruneVisualOverrides() {
+    for (const [id, claim] of this.visualClaims) {
+      const record = this._recordForNoteId(id);
+      if (!record || record.index !== claim.index || record.state !== "floating") {
+        this.visualClaims.delete(id);
+      }
+    }
+    if (!this.heartArrayOverride) return;
+    for (const index of this.heartArrayOverride.positions.keys()) {
+      const record = this.records[index];
+      if (!record || record.state !== "floating") {
+        this.heartArrayOverride.positions.delete(index);
+        this.heartArrayOverride.bases.delete(index);
+      }
+    }
+    if (!this.heartArrayOverride.positions.size) this.heartArrayOverride = null;
   }
 
   _rebuildNoteIndex() {
@@ -1301,6 +1425,7 @@ export class StarBottleScene {
       this._relayoutGalaxyTargets(false);
     }
     this._rebuildNoteIndex();
+    this._pruneVisualOverrides();
     this._refreshStarColors();
     return this.notes;
   }
@@ -1345,6 +1470,106 @@ export class StarBottleScene {
     return true;
   }
 
+  _positionObject(position) {
+    if (!position) return null;
+    return {
+      x: Number(position.x) || 0,
+      y: Number(position.y) || 0,
+      z: Number(position.z) || 0,
+    };
+  }
+
+  _positionVector(position) {
+    if (!position || !this.THREE) return null;
+    const x = Number(position.x);
+    const y = Number(position.y);
+    const z = Number(position.z);
+    if (![x, y, z].every(Number.isFinite)) return null;
+    return new this.THREE.Vector3(x, y, z);
+  }
+
+  _baseWorldPositionForRecord(record) {
+    if (!record) return null;
+    if (record.state === "physics" && record.body) {
+      return new this.THREE.Vector3(
+        record.body.position.x,
+        record.body.position.y,
+        record.body.position.z,
+      );
+    }
+    return record.position || null;
+  }
+
+  _visualOverrideForRecord(record) {
+    if (!record || record.state !== "floating") return null;
+    const claim = this.visualClaims.get(String(record.note.id));
+    if (claim?.index === record.index) return claim.position;
+    const heartPosition = this.heartArrayOverride?.positions?.get(record.index);
+    return heartPosition || null;
+  }
+
+  _displayPositionForRecord(record) {
+    return this._visualOverrideForRecord(record) || this._baseWorldPositionForRecord(record);
+  }
+
+  _dragCurrentPosition(record) {
+    if (!record) return null;
+    if (this.pointerWorld && record.state === "floating") {
+      const position = this.pointerWorld.clone();
+      // Floating stars follow the pointer on the field plane with a small
+      // lift, matching the existing drag motion.
+      const liftedY = Number(record.targetPosition?.y) + 0.11;
+      if (Number.isFinite(liftedY)) position.y = liftedY;
+      return position;
+    }
+    return this._displayPositionForRecord(record);
+  }
+
+  _emitStarDrag(callback, record, currentPosition) {
+    if (!record || record.state !== "floating" || !record.targetPosition) return;
+    const current = currentPosition || this._displayPositionForRecord(record);
+    if (!current) return;
+    const target = record.targetPosition;
+    const payload = {
+      noteId: String(record.note.id),
+      index: record.index,
+      currentPosition: current.clone(),
+      targetPosition: target.clone(),
+      distanceFromTarget: current.distanceTo(target),
+    };
+    try {
+      callback(payload);
+    } catch (error) {
+      // A consumer callback must not stop the render loop or pointer cleanup.
+      console.error("Star drag callback failed:", error);
+    }
+  }
+
+  _emitStarDragStart(record, currentPosition) {
+    if (!record || record.state !== "floating" || !record.targetPosition) return;
+    const current = currentPosition || this._displayPositionForRecord(record);
+    if (!current) return;
+    const payload = {
+      noteId: String(record.note.id),
+      index: record.index,
+      startPosition: current.clone(),
+      targetPosition: record.targetPosition.clone(),
+    };
+    try {
+      this.onStarDragStart(payload);
+    } catch (error) {
+      console.error("Star drag start callback failed:", error);
+    }
+  }
+
+  _emitStarDragMove(record, currentPosition) {
+    this._emitStarDrag(this.onStarDragMove, record, currentPosition);
+  }
+
+  _emitStarDragEnd(record, currentPosition) {
+    this._emitStarDrag(this.onStarDragEnd, record, currentPosition);
+  }
+
   _bindEvents() {
     this._onPointerMove = (event) => {
       if (!this._setPointerFromEvent(event)) return;
@@ -1352,7 +1577,18 @@ export class StarBottleScene {
 
       const totalX = event.clientX - this.dragStart.x;
       const totalY = event.clientY - this.dragStart.y;
-      if (!this.isDragging && Math.hypot(totalX, totalY) > 5) this.isDragging = true;
+      if (!this.isDragging && Math.hypot(totalX, totalY) > 5) {
+        this.isDragging = true;
+        const draggedRecord = this.records[this.draggedStarIndex];
+        if (this.dragMode === "star" && draggedRecord?.state === "floating") {
+          this._updatePointerWorld();
+          this.dragStarted = true;
+          this._emitStarDragStart(
+            draggedRecord,
+            this.dragInitialPosition || this._dragCurrentPosition(draggedRecord),
+          );
+        }
+      }
       if (this.isDragging) {
         if (this.dragMode === "camera") {
           const deltaX = event.clientX - this.dragLast.x;
@@ -1361,6 +1597,12 @@ export class StarBottleScene {
           this.viewPitch = clamp(this.viewPitch - deltaY * 0.0035, -0.2, 0.28);
           this.pointerWorld = null;
           this._setHovered(-1);
+        } else if (this.dragMode === "star" && this.dragStarted) {
+          this._updatePointerWorld();
+          this._emitStarDragMove(
+            this.records[this.draggedStarIndex],
+            this._dragCurrentPosition(this.records[this.draggedStarIndex]),
+          );
         }
         this.canvas.style.cursor = "grabbing";
       }
@@ -1375,16 +1617,21 @@ export class StarBottleScene {
       this._setHovered(-1);
     };
     this._onPointerDown = (event) => {
+      if (!this.starDragEnabled || this.interactionLocked) return;
       if (this.dragPointerId !== null || !this._setPointerFromEvent(event)) return;
       this.dragPointerId = event.pointerId;
       this.dragStart = { x: event.clientX, y: event.clientY };
       this.dragLast = { x: event.clientX, y: event.clientY };
       this.isDragging = false;
+      this.dragStarted = false;
       this.pressedTarget = this._pick();
       const pressedRecord =
         typeof this.pressedTarget === "number" ? this.records[this.pressedTarget] : null;
       this.dragMode = pressedRecord?.state === "floating" ? "star" : "camera";
       this.draggedStarIndex = this.dragMode === "star" ? this.pressedTarget : -1;
+      this.dragInitialPosition = this.dragMode === "star"
+        ? this._displayPositionForRecord(pressedRecord)?.clone() || null
+        : null;
       try {
         this.canvas.setPointerCapture(event.pointerId);
       } catch {
@@ -1397,6 +1644,11 @@ export class StarBottleScene {
       const activate = !this.isDragging;
       const draggedStarIndex = this.draggedStarIndex;
       const pressedTarget = this.pressedTarget;
+      const draggedRecord = this.records[draggedStarIndex];
+      if (this.isDragging && this.dragMode === "star" && this.dragStarted) {
+        this._updatePointerWorld();
+        this._emitStarDragEnd(draggedRecord, this._dragCurrentPosition(draggedRecord));
+      }
       try {
         if (this.canvas.hasPointerCapture(event.pointerId)) {
           this.canvas.releasePointerCapture(event.pointerId);
@@ -1411,6 +1663,8 @@ export class StarBottleScene {
       this.dragMode = null;
       this.pressedTarget = null;
       this.draggedStarIndex = -1;
+      this.dragStarted = false;
+      this.dragInitialPosition = null;
 
       if (draggedStarIndex >= 0) {
         this.records[draggedStarIndex]?.floatVelocity.set(0, 0, 0);
@@ -1437,6 +1691,11 @@ export class StarBottleScene {
     };
     this._onPointerCancel = (event) => {
       if (this.dragPointerId !== event.pointerId) return;
+      const draggedRecord = this.records[this.draggedStarIndex];
+      if (this.isDragging && this.dragMode === "star" && this.dragStarted) {
+        this._updatePointerWorld();
+        this._emitStarDragEnd(draggedRecord, this._dragCurrentPosition(draggedRecord));
+      }
       this.dragPointerId = null;
       this.dragStart = null;
       this.dragLast = null;
@@ -1444,6 +1703,8 @@ export class StarBottleScene {
       this.dragMode = null;
       this.pressedTarget = null;
       this.draggedStarIndex = -1;
+      this.dragStarted = false;
+      this.dragInitialPosition = null;
       this.canvas.style.cursor = "grab";
     };
     this._onWindowResize = () => this.resize();
@@ -1460,6 +1721,28 @@ export class StarBottleScene {
       this.resizeObserver = new ResizeObserver(() => this.resize());
       this.resizeObserver.observe(this.canvas);
     }
+  }
+
+  setStarDragEnabled(enabled = true) {
+    this.starDragEnabled = Boolean(enabled);
+    return this.starDragEnabled;
+  }
+
+  setInteractionLocked(locked = false) {
+    this.interactionLocked = Boolean(locked);
+    if (this.interactionLocked && this.dragPointerId !== null) {
+      this.dragPointerId = null;
+      this.dragStart = null;
+      this.dragLast = null;
+      this.isDragging = false;
+      this.dragMode = null;
+      this.pressedTarget = null;
+      this.draggedStarIndex = -1;
+      this.dragStarted = false;
+      this.dragInitialPosition = null;
+      this.canvas.style.cursor = "default";
+    }
+    return this.interactionLocked;
   }
 
   _pick() {
@@ -1503,7 +1786,7 @@ export class StarBottleScene {
         record.body.position.z,
       );
     } else {
-      this._pickProjection.copy(record.position);
+      this._pickProjection.copy(this._displayPositionForRecord(record) || record.position);
     }
     this._pickProjection.project(this.camera);
     if (this._pickProjection.z < -1 || this._pickProjection.z > 1) return Infinity;
@@ -1578,6 +1861,66 @@ export class StarBottleScene {
     this.raycaster.setFromCamera(this.pointer, this.camera);
     this.pointerWorld =
       this.raycaster.ray.intersectPlane(this._floatPlane, this._floatPointerVector) || null;
+  }
+
+  /**
+   * Convert viewport coordinates to the same ground plane used by the
+   * floating stars.  This is intentionally public so the DOM pet can be
+   * dragged without taking ownership of Three.js internals.
+   */
+  getGalaxyGroundPointFromScreen(clientX, clientY, options = {}) {
+    if (!this.camera || !this.canvas || !this.raycaster || !this.THREE) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    const width = Number(rect.width), height = Number(rect.height);
+    if (!(width > 0) || !(height > 0)) return null;
+    const x = Number(clientX), y = Number(clientY);
+    if (![x, y].every(Number.isFinite)) return null;
+    this.camera.updateMatrixWorld?.(true);
+    const pointer = new this.THREE.Vector2(
+      ((x - rect.left) / width) * 2 - 1,
+      -((y - rect.top) / height) * 2 + 1,
+    );
+    this.raycaster.setFromCamera(pointer, this.camera);
+    const groundY = Number.isFinite(Number(options?.y))
+      ? Number(options.y)
+      : GALAXY_SURFACE_Y - 0.18;
+    const directionY = this.raycaster.ray.direction.y;
+    if (Math.abs(directionY) < 1e-5) return null;
+    const distanceAlongRay = (groundY - this.raycaster.ray.origin.y) / directionY;
+    if (!(distanceAlongRay > 0) || !Number.isFinite(distanceAlongRay)) return null;
+    const hit = this.raycaster.ray.origin.clone().addScaledVector(
+      this.raycaster.ray.direction,
+      distanceAlongRay,
+    );
+    return this.getGalaxyGroundPoint(hit.x, hit.z, { ...options, y: groundY });
+  }
+
+  /** Set the pet's world anchor and enable star-pushing collision feedback. */
+  setPetWorldPosition(worldPosition, options = {}) {
+    const position = this._positionVector(worldPosition);
+    if (!position) return false;
+    const previous = this.petWorldPosition?.clone?.() || position.clone();
+    if (!this.petWorldPosition) this.petWorldPosition = position.clone();
+    const now = Number(this.elapsed) || 0;
+    const elapsed = Math.max(0.001, now - (Number(this.petPositionUpdatedAt) || now - 1 / 60));
+    this.petWorldPosition.copy(position);
+    this.petWorldVelocity.copy(position).sub(previous).multiplyScalar(1 / elapsed);
+    this.petPositionUpdatedAt = now;
+    this.petCollisionEnabled = options.enabled !== false;
+    if (this.petSprite) this.petSprite.visible = this.petSpriteVisible;
+    return true;
+  }
+
+  getPetWorldPosition() {
+    return this.petWorldPosition ? this._positionObject(this.petWorldPosition) : null;
+  }
+
+  clearPetWorldPosition() {
+    this.petWorldPosition = null;
+    this.petWorldVelocity?.set?.(0, 0, 0);
+    this.petCollisionEnabled = false;
+    if (this.petSprite) this.petSprite.visible = false;
+    return true;
   }
 
   openBottle() {
@@ -2092,6 +2435,10 @@ export class StarBottleScene {
     const interactionPointer =
       this.isDragging && this.dragMode === "star" ? pointer : null;
     const pointerRadiusSquared = FLOAT_POINTER_RADIUS * FLOAT_POINTER_RADIUS;
+    const pet = this.petCollisionEnabled ? this.petWorldPosition : null;
+    const petInfluenceRadius = this.petCollisionRadius + FLOAT_COLLISION_DISTANCE + 0.22;
+    const petInfluenceRadiusSquared = petInfluenceRadius * petInfluenceRadius;
+    const petSpeed = pet ? Math.hypot(this.petWorldVelocity?.x || 0, this.petWorldVelocity?.z || 0) : 0;
 
     for (const record of floating) {
       const phase = record.floatPhase + this.elapsed * record.floatFrequency;
@@ -2141,6 +2488,34 @@ export class StarBottleScene {
           const swirl = Math.sin(phase + distance * 5.2) * influence * 0.42;
           record.floatVelocity.x += (-dz / distance) * swirl * step;
           record.floatVelocity.z += (dx / distance) * swirl * step;
+        }
+      }
+
+      // The pet is a 2D sprite, but its anchor participates in the same
+      // horizontal collision field as a star.  A moving pet transfers a
+      // little more impulse; a stationary overlap is still separated gently
+      // so the character never becomes buried inside a star.
+      if (pet && !draggingThisStar) {
+        const dx = record.position.x - pet.x;
+        const dz = record.position.z - pet.z;
+        const distanceSquared = dx * dx + dz * dz;
+        if (distanceSquared < petInfluenceRadiusSquared) {
+          const distance = Math.sqrt(distanceSquared) || 0.001;
+          const normalX = dx / distance;
+          const normalZ = dz / distance;
+          const influence = 1 - distance / petInfluenceRadius;
+          const impulse = (influence * 1.9 + influence * influence * 3.8) * step;
+          record.floatVelocity.x += normalX * impulse;
+          record.floatVelocity.z += normalZ * impulse;
+          if (petSpeed > 0.02) {
+            record.floatVelocity.x += (this.petWorldVelocity.x || 0) * influence * 0.18 * step;
+            record.floatVelocity.z += (this.petWorldVelocity.z || 0) * influence * 0.18 * step;
+          }
+          const overlap = this.petCollisionRadius + STAR_COLLISION_RADIUS - distance;
+          if (overlap > 0) {
+            record.position.x += normalX * overlap * 0.72;
+            record.position.z += normalZ * overlap * 0.72;
+          }
         }
       }
 
@@ -2290,7 +2665,9 @@ export class StarBottleScene {
           record.body.quaternion.w,
         );
       } else {
-        dummy.position.copy(record.position);
+        const displayPosition = this._displayPositionForRecord(record);
+        if (displayPosition) dummy.position.copy(displayPosition);
+        else dummy.position.copy(record.position);
         dummy.quaternion.copy(record.quaternion);
       }
 
@@ -2405,26 +2782,304 @@ export class StarBottleScene {
   _worldPositionForIndex(index) {
     const record = this.records[index];
     if (!record) return null;
-    if (record.state === "physics" && record.body) {
-      return new this.THREE.Vector3(
-        record.body.position.x,
-        record.body.position.y,
-        record.body.position.z,
-      );
-    }
-    return record.position.clone();
+    return this._displayPositionForRecord(record)?.clone() || null;
   }
 
   _screenPositionForIndex(index) {
     const position = this._worldPositionForIndex(index);
-    if (!position) return null;
+    return this.getWorldScreenPosition(position);
+  }
+
+  /**
+   * Project a world-space point onto the canvas without exposing Three.js
+   * objects to the pet controller.  The returned scale is relative to the
+   * current camera distance, so a DOM sprite can preserve the board's depth
+   * cue while remaining independent from the WebGL scene graph.
+   */
+  getWorldScreenPosition(worldPosition) {
+    if (!worldPosition || !this.camera || !this.canvas || !this.THREE) return null;
+    const x = Number(worldPosition.x);
+    const y = Number(worldPosition.y);
+    const z = Number(worldPosition.z);
+    if (![x, y, z].every(Number.isFinite)) return null;
+    this.camera.updateMatrixWorld?.(true);
+    const projected = new this.THREE.Vector3(x, y, z);
+    const cameraSpace = projected.clone().applyMatrix4(this.camera.matrixWorldInverse);
+    projected.project(this.camera);
     const rect = this.canvas.getBoundingClientRect();
-    position.project(this.camera);
+    const distance = Math.max(0.1, -cameraSpace.z);
+    const referenceDistance = Math.max(
+      0.1,
+      Number(this.cameraDistance) || Number(this.baseCameraDistance) || 9.7,
+    );
     return {
-      x: rect.left + (position.x * 0.5 + 0.5) * rect.width,
-      y: rect.top + (-position.y * 0.5 + 0.5) * rect.height,
-      visible: position.z > -1 && position.z < 1,
+      x: rect.left + (projected.x * 0.5 + 0.5) * rect.width,
+      y: rect.top + (-projected.y * 0.5 + 0.5) * rect.height,
+      visible: projected.z > -1 && projected.z < 1,
+      depth: distance,
+      scale: clamp(referenceDistance / distance, 0.76, 1.18),
+      world: { x, y, z },
     };
+  }
+
+  /** Return the usable world-space rectangle of the visible galaxy board. */
+  getGalaxyGroundBounds(options = {}) {
+    options = options && typeof options === "object" ? options : {};
+    const centerX = Number(this.galaxyCenterX) || 0.8;
+    const centerZ = Number(this.galaxyCenterZ) || 0;
+    const halfWidth = Math.max(1, Number(this.galaxyHalfWidth) || 4.8);
+    const halfDepth = Math.max(1, Number(this.galaxyHalfDepth) || 2.8);
+    const requestedInset = Number(options.inset);
+    const inset = Math.max(
+      0,
+      Number.isFinite(requestedInset) ? requestedInset : 0.18,
+    );
+    const minX = centerX - Math.max(0.45, halfWidth - inset);
+    const maxX = centerX + Math.max(0.45, halfWidth - inset);
+    const minZ = centerZ - Math.max(0.45, halfDepth - inset);
+    const maxZ = centerZ + Math.max(0.45, halfDepth - inset);
+    return {
+      minX,
+      maxX,
+      minZ,
+      maxZ,
+      centerX,
+      centerZ,
+      width: Math.max(0.9, maxX - minX),
+      depth: Math.max(0.9, maxZ - minZ),
+      surfaceY: GALAXY_SURFACE_Y,
+      boardY: GALAXY_SURFACE_Y - 0.18,
+    };
+  }
+
+  /** Resolve a point on the same gently undulating surface used by stars. */
+  getGalaxyGroundPoint(x, z, options = {}) {
+    options = options && typeof options === "object" ? options : {};
+    const bounds = this.getGalaxyGroundBounds(options);
+    const numericX = Number(x);
+    const numericZ = Number(z);
+    const requestedX = Number.isFinite(numericX) ? numericX : bounds.centerX;
+    const requestedZ = Number.isFinite(numericZ) ? numericZ : bounds.centerZ;
+    // Normal scene callers stay on the board by default.  Pet drag/recovery
+    // paths can explicitly opt out so a character may be pulled beyond the
+    // galaxy and then walk back through the same world-space plane.
+    const clampToBounds = options.clamp !== false;
+    const pointX = clampToBounds
+      ? clamp(requestedX, bounds.minX, bounds.maxX)
+      : requestedX;
+    const pointZ = clampToBounds
+      ? clamp(requestedZ, bounds.minZ, bounds.maxZ)
+      : requestedZ;
+    const baseY = Number(options.y);
+    const y = Number.isFinite(baseY)
+      ? baseY
+      : GALAXY_SURFACE_Y - 0.18 + this._waveHeightAt(pointX, pointZ, this.elapsed) * 0.15;
+    return { x: pointX, y, z: pointZ };
+  }
+
+  _recordForNoteId(noteId) {
+    const index = this.noteIndex.get(String(noteId));
+    return Number.isInteger(index) ? this.records[index] || null : null;
+  }
+
+  getStarSnapshot(noteId) {
+    const record = this._recordForNoteId(noteId);
+    if (!record) return null;
+    const position = this._worldPositionForIndex(record.index);
+    const targetPosition = record.targetPosition?.clone?.() || null;
+    return {
+      noteId: String(record.note.id),
+      index: record.index,
+      state: record.state,
+      emotion: record.emotion,
+      position: this._positionObject(position),
+      targetPosition: this._positionObject(targetPosition),
+      screenPosition: this._screenPositionForIndex(record.index),
+      distanceFromTarget: position && targetPosition
+        ? position.distanceTo(targetPosition)
+        : null,
+    };
+  }
+
+  getStarScreenPosition(noteId) {
+    const record = this._recordForNoteId(noteId);
+    return record ? this._screenPositionForIndex(record.index) : null;
+  }
+
+  getFloatingStarSnapshots() {
+    return this.records
+      .filter((record) => record.state === "floating")
+      .map((record) => {
+        const position = this._worldPositionForIndex(record.index);
+        return {
+          noteId: String(record.note.id),
+          index: record.index,
+          state: record.state,
+          emotion: record.emotion,
+          position: this._positionObject(position),
+          targetPosition: this._positionObject(record.targetPosition),
+          screenPosition: this.getWorldScreenPosition(position),
+        };
+      });
+  }
+
+  getClusterCenter() {
+    if (!this.records.length) {
+      return { x: 0, y: GALAXY_SURFACE_Y, z: 0 };
+    }
+    const positions = this.records
+      .filter((record) => record.state === "floating" && record.targetPosition)
+      .map((record) => record.targetPosition);
+    if (!positions.length) {
+      return {
+        x: Number(this.galaxyCenterX) || 0,
+        y: GALAXY_SURFACE_Y,
+        z: Number(this.galaxyCenterZ) || 0,
+      };
+    }
+    const center = positions.reduce(
+      (result, position) => result.add(position),
+      new this.THREE.Vector3(),
+    ).multiplyScalar(1 / positions.length);
+    return this._positionObject(center);
+  }
+
+  claimStarVisual(noteId) {
+    const record = this._recordForNoteId(noteId);
+    if (!record || record.state !== "floating") return false;
+    const id = String(record.note.id);
+    const existing = this.visualClaims.get(id);
+    if (existing?.index === record.index) return true;
+    const position = this._displayPositionForRecord(record);
+    if (!position) return false;
+    this.visualClaims.set(id, {
+      index: record.index,
+      position: position.clone(),
+    });
+    return true;
+  }
+
+  setStarVisualPosition(noteId, worldPosition) {
+    const id = String(noteId);
+    const record = this._recordForNoteId(id);
+    const claim = this.visualClaims.get(id);
+    const position = this._positionVector(worldPosition);
+    if (!record || record.state !== "floating" || !claim || !position) return false;
+    if (claim.index !== record.index) return false;
+    claim.position.copy(position);
+    return true;
+  }
+
+  /**
+   * Apply a small transient impulse to a floating star.  This is intentionally
+   * velocity-first: targetPosition, shared geometry, and Cannon bodies remain
+   * untouched, so the normal floating spring/collision pass owns recovery.
+   * A tiny visual nudge makes a close contact readable even between frames.
+   * DOM pets use this when their world-space walk path brushes a star.
+   */
+  pushStarVisual(noteId, impulse = {}) {
+    const id = String(noteId);
+    const record = this._recordForNoteId(id);
+    if (!record || record.state !== "floating" || !record.floatVelocity) return false;
+    const x = Number(impulse?.x);
+    const z = Number(impulse?.z);
+    if (![x, z].every(Number.isFinite)) return false;
+    const maxImpulse = Math.max(0.02, Number(impulse?.max) || 0.42);
+    const magnitude = Math.hypot(x, z);
+    const scale = magnitude > maxImpulse ? maxImpulse / magnitude : 1;
+    const appliedX = x * scale;
+    const appliedZ = z * scale;
+    record.floatVelocity.x += appliedX;
+    record.floatVelocity.z += appliedZ;
+    const claim = this.visualClaims.get(id);
+    const position = claim?.index === record.index ? claim.position : record.position;
+    if (position) {
+      position.x += appliedX * 0.045;
+      position.z += appliedZ * 0.045;
+      if (claim?.index === record.index) claim.position.copy(position);
+    }
+    return true;
+  }
+
+  releaseStarVisual(noteId, options = {}) {
+    const id = String(noteId);
+    const record = this._recordForNoteId(id);
+    const claim = this.visualClaims.get(id);
+    if (!record || !claim || claim.index !== record.index) return false;
+    const snapToTarget = options?.snapToTarget !== false;
+    if (record.state === "floating") {
+      const releasePosition = snapToTarget ? record.targetPosition : claim.position;
+      if (releasePosition) record.position.copy(releasePosition);
+      record.floatVelocity.set(0, 0, 0);
+    }
+    this.visualClaims.delete(id);
+    return true;
+  }
+
+  _normalizeHeartPositions(positions) {
+    const normalized = new Map();
+    if (!positions) return normalized;
+    const entries = positions instanceof Map
+      ? [...positions.entries()]
+      : Array.isArray(positions)
+        ? positions.map((position, index) => [index, position])
+        : typeof positions === "object"
+          ? Object.entries(positions)
+          : [];
+    for (const [key, candidate] of entries) {
+      const numericKey = Number(key);
+      const index = Number.isInteger(numericKey) && numericKey >= 0
+        ? numericKey
+        : this.noteIndex.get(String(key));
+      if (!Number.isInteger(index)) continue;
+      const record = this.records[index];
+      if (!record || record.state !== "floating") continue;
+      const x = Number(Array.isArray(candidate) ? candidate[0] : candidate?.x);
+      const z = Number(Array.isArray(candidate) ? candidate[2] ?? candidate[1] : candidate?.z);
+      const explicitY = Number(Array.isArray(candidate) ? candidate[2] === undefined ? undefined : candidate[1] : candidate?.y);
+      const y = Number.isFinite(explicitY)
+        ? explicitY
+        : Number(record.targetPosition?.y ?? GALAXY_SURFACE_Y);
+      const vector = [x, y, z].every(Number.isFinite)
+        ? new this.THREE.Vector3(x, y, z)
+        : null;
+      if (vector) normalized.set(index, vector);
+    }
+    return normalized;
+  }
+
+  setHeartArrayOverride(progress, positions) {
+    const normalized = this._normalizeHeartPositions(positions);
+    if (!normalized.size) return false;
+    const amount = clamp(Number(progress) || 0, 0, 1);
+    if (!this.heartArrayOverride) {
+      this.heartArrayOverride = {
+        progress: 0,
+        bases: new Map(),
+        positions: new Map(),
+      };
+    }
+    const override = this.heartArrayOverride;
+    override.progress = amount;
+    for (const [index, target] of normalized) {
+      if (!override.bases.has(index)) {
+        const record = this.records[index];
+        const base = this._baseWorldPositionForRecord(record)?.clone?.() || null;
+        if (base) override.bases.set(index, base);
+      }
+      const base = override.bases.get(index);
+      if (!base) continue;
+      const visual = override.positions.get(index) || new this.THREE.Vector3();
+      visual.lerpVectors(base, target, amount);
+      override.positions.set(index, visual);
+    }
+    return true;
+  }
+
+  clearHeartArrayOverride() {
+    const hadOverride = Boolean(this.heartArrayOverride);
+    this.heartArrayOverride = null;
+    return hadOverride;
   }
 
   getEmotionAnchors() {
@@ -2560,6 +3215,7 @@ export class StarBottleScene {
     this._updatePointerWorld();
     this._updateHover();
     this._updateFloatingMotion(delta);
+    this._updatePetSprite();
 
     this.skyNear.rotation.y += delta * 0.0022;
     this.skyFar.rotation.y -= delta * 0.001;
@@ -2579,6 +3235,8 @@ export class StarBottleScene {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.visualClaims.clear();
+    this.heartArrayOverride = null;
     cancelAnimationFrame(this.animationFrame);
     clearTimeout(this.focusTimer);
     this.focusResolve?.(false);
@@ -2610,6 +3268,9 @@ export class StarBottleScene {
     }
     this.records.length = 0;
     this.noteIndex.clear();
+    this.clearPetWorldPosition();
+    for (const texture of this.petTextureCache.values()) texture.dispose?.();
+    this.petTextureCache.clear();
   }
 }
 
