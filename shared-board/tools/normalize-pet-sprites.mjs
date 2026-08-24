@@ -188,9 +188,15 @@ const jobs = [
   ["drop-scroll-retry.png", "drop-scroll.png"],
   ["hug-star-retry.png", "hug-star.png"],
   ["magic-wand-retry.png", "magic-wand.png"],
+  ["push-left-1024.png", "push-left.png"],
+  ["push-right-1024.png", "push-right.png"],
+  ["coding-cool-01-1024.png", "coding-01.png"],
+  ["coding-cool-02-1024.png", "coding-02.png"],
 ];
-const root = path.resolve("public/pet/generated/actions-v2");
+const root = path.resolve(process.argv[2] || "public/pet/generated/actions-v2");
+const outputRoot = path.resolve(process.argv[3] || path.join(root, "normalized"));
 for (const [input, output] of jobs) {
-  const result = normalize(path.join(root, input), path.join(root, "normalized", output));
+  if (!fs.existsSync(path.join(root, input))) continue;
+  const result = normalize(path.join(root, input), path.join(outputRoot, output));
   console.log(JSON.stringify(result));
 }

@@ -1,6 +1,6 @@
-import { StarBottleScene } from "/scene.js?v=20260819-pet16";
-import PetView from "/pet-view.js?v=20260819-pet16";
-import { PetController } from "/pet-controller.js?v=20260819-pet16";
+import { StarBottleScene } from "/scene.js?v=20260824-pet21";
+import PetView from "/pet-view.js?v=20260824-pet21";
+import { PetController } from "/pet-controller.js?v=20260824-pet21";
 
 const EMOTIONS = {
   joy: { label: "开心", color: "#ff863e", level: 1 },

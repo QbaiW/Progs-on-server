@@ -16,6 +16,7 @@ export const PET_STATES = Object.freeze({
   ACCOMPANYING_READ: "ACCOMPANYING_READ",
   PLAYING_WITH_STAR: "PLAYING_WITH_STAR",
   IDLE_MAGIC: "IDLE_MAGIC",
+  CODING: "CODING",
   IDLE: "IDLE",
 });
 
@@ -25,8 +26,14 @@ export const PET_PRIORITY = Object.freeze({
   [PET_STATES.ACCOMPANYING_READ]: 2,
   [PET_STATES.PLAYING_WITH_STAR]: 3,
   [PET_STATES.IDLE_MAGIC]: 4,
+  [PET_STATES.CODING]: 4,
   [PET_STATES.IDLE]: 5,
 });
+
+const IDLE_ACTION_STATES = new Set([
+  PET_STATES.IDLE_MAGIC,
+  PET_STATES.CODING,
+]);
 
 const EMOTION_POSES = Object.freeze({
   joy: { pose: "wiggle", fragment: "heart" },
@@ -54,6 +61,9 @@ const DEFAULT_TIMINGS = Object.freeze({
   wanderDurationMax: 3_200,
   wanderPauseMin: 2_400,
   wanderPauseMax: 5_000,
+  // Coding belongs to the roaming cadence: four completed exploratory walks
+  // are followed by one stationary work break.
+  codingAfterWanders: 4,
   magicInactivity: 5_000,
   pushTravelDuration: 2_800,
   magicAfterMin: 60_000,
@@ -71,6 +81,8 @@ const DEFAULT_TIMINGS = Object.freeze({
   // stars back to their original positions before releasing the override.
   magicHeartHoldDuration: 5_000,
   magicHeartReturnDuration: 3_600,
+  codingDuration: 8_000,
+  codingPoseInterval: 420,
   settlePoll: 160,
 });
 
@@ -214,7 +226,9 @@ export class PetController {
     this._worldProjectionFollowingToken = null;
     this._lastActivityAt = this.clock.now();
     this._backgroundArmedAt = 0;
+    this._showcaseDueAt = 0;
     this._wander = null;
+    this._completedWandersSinceCoding = 0;
     this._lastWalkBounds = null;
     this._lastWorldPosition = null;
     this._petStarContactAt = new Map();
@@ -401,6 +415,9 @@ export class PetController {
         break;
       case PET_STATES.IDLE_MAGIC:
         this._enterMagic(context, token);
+        break;
+      case PET_STATES.CODING:
+        this._enterCoding(context, token);
         break;
       default:
         this._setWorldRendering(this._sceneSettled);
@@ -646,7 +663,9 @@ export class PetController {
         );
         const pushDirection = motion.starTarget.x < motion.starStart.x ? "left" : "right";
         this._setWalking(true, pushDirection);
-        this._setPose("fist-bump");
+        // Use direction-specific push artwork so left/right movement is
+        // visible in both the DOM sprite and the 3D galaxy sprite.
+        this._setPose(pushDirection === "left" ? "push-left" : "push-right");
         motion.frame = this._setFrame(tick, token);
         return;
       }
@@ -778,8 +797,7 @@ export class PetController {
     try { this.scene?.setStarDragEnabled?.(false); } catch { /* optional scene API */ }
     try { this.scene?.setInteractionLocked?.(true, "pet-magic"); } catch { /* optional scene API */ }
     this.view?.show?.();
-    this._setPose("big-heart");
-    this.view?.showHeart?.();
+    this._setPose("magic-wand");
     this._setTimer(() => {
       if (!this._isTokenCurrent(token)) return;
       const snapshot = this.scene?.getStarSnapshot?.(context.noteId) || null;
@@ -810,6 +828,8 @@ export class PetController {
 
   _holdHeartArray(token, positions) {
     if (!this._isTokenCurrent(token) || this.state !== PET_STATES.IDLE_MAGIC) return;
+    this._setPose("big-heart");
+    this.view?.showHeart?.();
     // Keep sending a settled progress value so scene adapters that lazily
     // create their override do not clear it while the hold timer is pending.
     try { this.scene?.setHeartArrayOverride?.(1, positions); } catch { /* optional scene API */ }
@@ -838,6 +858,25 @@ export class PetController {
     this._returnFromTransient();
   }
 
+  _enterCoding(context, token) {
+    this._setWorldRendering(true);
+    if (this._uiBlocked && !context.manual) {
+      this._transition(PET_STATES.IDLE, {}, { force: true });
+      return;
+    }
+    this.view?.show?.();
+    this._setWalking(false);
+    this._schedulePoseLoop(
+      ["coding-01", "coding-02"],
+      Math.max(1, finite(this.timings.codingPoseInterval, 420)),
+      token,
+    );
+    this._setTimer(() => {
+      if (!this._isTokenCurrent(token) || this.state !== PET_STATES.CODING) return;
+      this._returnFromTransient();
+    }, this.timings.codingDuration, token);
+  }
+
   _returnFromTransient({ startUnread = false } = {}) {
     this._transition(PET_STATES.IDLE, {}, { force: true });
     if (startUnread && this._startNextUnread()) return;
@@ -851,7 +890,7 @@ export class PetController {
     this.resumeState = null;
     if (!resume || resume.state === PET_STATES.PUSHING_NEW_NOTE || resume.state === PET_STATES.RETRIEVING_STAR) return;
     if (resume.state === PET_STATES.ACCOMPANYING_READ && !this._noteOpenId) return;
-    if ((resume.state === PET_STATES.PLAYING_WITH_STAR || resume.state === PET_STATES.IDLE_MAGIC) && (!this._sceneSettled || this._uiBlocked)) return;
+    if ((resume.state === PET_STATES.PLAYING_WITH_STAR || IDLE_ACTION_STATES.has(resume.state)) && (!this._sceneSettled || this._uiBlocked)) return;
     this._transition(resume.state, resume.context, { force: true, replace: true });
   }
 
@@ -1041,6 +1080,7 @@ export class PetController {
       this._uiBlocked = false;
       this._readAnchorReleased = false;
       this._lastActivityAt = this.clock.now();
+      this._showcaseDueAt = 0;
       this._armBackgroundTimers();
       return true;
     }
@@ -1049,6 +1089,7 @@ export class PetController {
     this._uiBlocked = false;
     this._readAnchorReleased = false;
     this._lastActivityAt = this.clock.now();
+    this._showcaseDueAt = 0;
     const resume = this.resumeState;
     this.resumeState = null;
     if (resume && resume.state !== PET_STATES.ACCOMPANYING_READ && resume.state !== PET_STATES.PUSHING_NEW_NOTE) {
@@ -1088,10 +1129,11 @@ export class PetController {
   userActivity(detail = {}) {
     if (this.destroyed) return;
     this._lastActivityAt = this.clock.now();
+    this._showcaseDueAt = 0;
     this._uiBlocked = Boolean(detail.blocked || detail.noteOpen || detail.editorOpen || detail.favoritesOpen || detail.modalOpen);
     // Unread notifications travel on the galaxy plane; pointer activity must
     // not teleport the companion beside the cursor.
-    if (this.state === PET_STATES.IDLE_MAGIC && !detail.internal) return;
+    if (IDLE_ACTION_STATES.has(this.state) && !detail.internal) return;
     this._armBackgroundTimers();
   }
 
@@ -1173,10 +1215,17 @@ export class PetController {
       // A heart arrangement or an active star handoff owns the scene.  Let a
       // normal note companion remain draggable so it can be moved out of the
       // paper's way, while preserving those higher-priority animations.
-      if (this._magicLocked || this.state === PET_STATES.IDLE_MAGIC || this.state === PET_STATES.RETRIEVING_STAR || this.state === PET_STATES.PUSHING_NEW_NOTE || this.state === PET_STATES.PLAYING_WITH_STAR) return false;
+      if (
+        this._magicLocked ||
+        IDLE_ACTION_STATES.has(this.state) ||
+        this.state === PET_STATES.RETRIEVING_STAR ||
+        this.state === PET_STATES.PUSHING_NEW_NOTE ||
+        this.state === PET_STATES.PLAYING_WITH_STAR
+      ) return false;
       this._stopIdleWander();
       this._cancelBackgroundTimers();
       this._lastActivityAt = this.clock.now();
+      this._showcaseDueAt = 0;
       const screenStart = {
         x: finite(detail.position?.x, this.view?.position?.x),
         y: finite(detail.position?.y, this.view?.position?.y),
@@ -1262,6 +1311,8 @@ export class PetController {
     if (!this._sceneSettled) return false;
     // A direct click replaces any background interaction queued for resume.
     this.resumeState = null;
+    this._lastActivityAt = this.clock.now();
+    this._showcaseDueAt = 0;
     return this._transition(PET_STATES.IDLE_MAGIC, { manual: true }, { force: true, replace: true });
   }
 
@@ -1281,7 +1332,8 @@ export class PetController {
         this.view?.hide?.();
       }
       this._cancelBackgroundTimers();
-      if (this.state === PET_STATES.IDLE_MAGIC) this._transition(PET_STATES.IDLE, {}, { force: true });
+      this._showcaseDueAt = 0;
+      if (IDLE_ACTION_STATES.has(this.state)) this._transition(PET_STATES.IDLE, {}, { force: true });
     }
   }
 
@@ -1574,6 +1626,29 @@ export class PetController {
     if (this.state === PET_STATES.IDLE) this._setPose("idle");
   }
 
+  _scheduleAfterAutonomousWander(wander, pause) {
+    if (this.destroyed || this.state !== PET_STATES.IDLE || this._uiBlocked || !this._sceneSettled) return;
+    // Returning after a player drag is corrective movement, not one of the
+    // pet's voluntary walks, so it must not advance the work-break cadence.
+    if (wander?.returning) {
+      this._scheduleIdleWander(pause);
+      return;
+    }
+
+    this._completedWandersSinceCoding += 1;
+    const walksPerWorkBreak = Math.max(1, Math.floor(finite(this.timings.codingAfterWanders, 4)));
+    if (this._completedWandersSinceCoding < walksPerWorkBreak) {
+      this._scheduleIdleWander(pause);
+      return;
+    }
+
+    this._completedWandersSinceCoding = 0;
+    this._setTimer(() => {
+      if (this.destroyed || this.state !== PET_STATES.IDLE || this._uiBlocked || !this._sceneSettled) return;
+      this._transition(PET_STATES.CODING, { autonomous: true }, { force: true, replace: true });
+    }, Math.max(0, finite(pause)), null, true);
+  }
+
   _scheduleIdleWander(delay = null) {
     if (this.destroyed || !this._sceneSettled || this._uiBlocked || this.state !== PET_STATES.IDLE) return;
     const wait = delay === null
@@ -1625,7 +1700,10 @@ export class PetController {
       this._wander = null;
       this._setWalking(false, direction);
       this._setPose("idle");
-      this._scheduleIdleWander(this._randomBetween(this.timings.wanderPauseMin, this.timings.wanderPauseMax));
+      this._scheduleAfterAutonomousWander(
+        wander,
+        this._randomBetween(this.timings.wanderPauseMin, this.timings.wanderPauseMax),
+      );
     };
     this._wander.frame = this._setFrame(tick, token);
     this._emit("wander-start", { from, target, duration });
@@ -1695,7 +1773,7 @@ export class PetController {
       const pause = wander.returning
         ? Math.min(650, this._randomBetween(this.timings.wanderPauseMin, this.timings.wanderPauseMax))
         : this._randomBetween(this.timings.wanderPauseMin, this.timings.wanderPauseMax);
-      this._scheduleIdleWander(pause);
+      this._scheduleAfterAutonomousWander(wander, pause);
     };
     this._wander.frame = this._setFrame(tick, token);
     this._emit("wander-start", { from, target, duration, world: true, returning });
@@ -1747,23 +1825,33 @@ export class PetController {
   }
 
   _armBackgroundTimers() {
-    if (this.destroyed || !this._sceneSettled || this._uiBlocked || this.priority < PET_PRIORITY[PET_STATES.IDLE_MAGIC]) return;
+    if (this.destroyed || !this._sceneSettled || this._uiBlocked || this.state !== PET_STATES.IDLE) return;
     // Re-arming is also used after user activity and scene updates.  Stop an
     // in-flight walk first so one event cannot leave duplicate wander loops.
     this._stopIdleWander();
     this._cancelBackgroundTimers();
     this._backgroundArmedAt = this.clock.now();
     const playDelay = finite(this.timings.playAfterMin) + Math.max(0, Math.min(1, this.random())) * Math.max(0, finite(this.timings.playAfterMax) - finite(this.timings.playAfterMin));
-    const magicDelay = finite(this.timings.magicAfterMin) + Math.max(0, Math.min(1, this.random())) * Math.max(0, finite(this.timings.magicAfterMax) - finite(this.timings.magicAfterMin));
+    if (this._showcaseDueAt <= 0) {
+      const showcaseDelay = finite(this.timings.magicAfterMin) + Math.max(0, Math.min(1, this.random())) * Math.max(0, finite(this.timings.magicAfterMax) - finite(this.timings.magicAfterMin));
+      this._showcaseDueAt = this.clock.now() + Math.max(0, showcaseDelay);
+    }
+    const showcaseDelay = Math.max(0, this._showcaseDueAt - this.clock.now());
     this._setTimer(() => {
       if (this.state !== PET_STATES.IDLE || this._uiBlocked || this.clock.now() - this._lastActivityAt < finite(this.timings.magicInactivity)) return this._armBackgroundTimers();
       const target = this._chooseNearbyStar();
       if (target) this._transition(PET_STATES.PLAYING_WITH_STAR, { star: target }, { force: true, replace: true });
     }, playDelay, null, true);
+    // Heart magic remains a rare long-idle interaction.  Coding is scheduled
+    // from completed autonomous walks, so it has a reliable 1:4 cadence.
     this._setTimer(() => {
-      if (this.state !== PET_STATES.IDLE || this._uiBlocked || this.clock.now() - this._lastActivityAt < finite(this.timings.magicInactivity)) return this._armBackgroundTimers();
-      this._transition(PET_STATES.IDLE_MAGIC, {}, { force: true, replace: true });
-    }, magicDelay, null, true);
+      if (this.state !== PET_STATES.IDLE || this._uiBlocked || this.clock.now() - this._lastActivityAt < finite(this.timings.magicInactivity)) {
+        this._showcaseDueAt = 0;
+        return this._armBackgroundTimers();
+      }
+      this._showcaseDueAt = 0;
+      this._transition(PET_STATES.IDLE_MAGIC, { autonomous: true }, { force: true, replace: true });
+    }, showcaseDelay, null, true);
     this._scheduleIdleWander(this._randomBetween(this.timings.wanderAfterMin, this.timings.wanderAfterMax));
   }
 

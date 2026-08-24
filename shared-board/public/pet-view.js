@@ -17,16 +17,20 @@ const DEFAULT_ASSETS = Object.freeze({
   "arms-crossed": "arms-crossed.png",
   // Action sprites are versioned independently from the app bundle so a
   // browser cannot keep displaying the earlier idle-image placeholders.
-  "pacing-left": "pacing-left.png?v=20260819-actions2",
-  "pacing-right": "pacing-right.png?v=20260819-actions2",
+  "pacing-left": "pacing-left.png?v=20260820-actions3",
+  "pacing-right": "pacing-right.png?v=20260820-actions3",
+  "push-left": "push-left.png?v=20260820-actions3",
+  "push-right": "push-right.png?v=20260820-actions3",
   "lying-down": "lying-down.png",
-  "big-heart": "big-heart.png?v=20260819-actions2",
-  "fist-bump": "fist-bump.png?v=20260819-actions2",
-  "hug-star": "hug-star.png?v=20260819-actions2",
-  "cry-cover-face": "cry-cover-face.png?v=20260819-actions2",
-  "pull-scroll": "pull-scroll.png?v=20260819-actions2",
-  "drop-scroll": "drop-scroll.png?v=20260819-actions2",
-  "magic-wand": "magic-wand.png?v=20260819-actions2",
+  "big-heart": "big-heart.png?v=20260820-actions3",
+  "fist-bump": "fist-bump.png?v=20260820-actions3",
+  "hug-star": "hug-star.png?v=20260820-actions3",
+  "cry-cover-face": "cry-cover-face.png?v=20260820-actions3",
+  "pull-scroll": "pull-scroll.png?v=20260820-actions3",
+  "drop-scroll": "drop-scroll.png?v=20260820-actions3",
+  "magic-wand": "magic-wand.png?v=20260820-actions3",
+  "coding-01": "coding-01.png?v=20260824-workstate2",
+  "coding-02": "coding-02.png?v=20260824-workstate2",
 });
 
 const POSE_ALIASES = Object.freeze({

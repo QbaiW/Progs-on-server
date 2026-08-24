@@ -14,6 +14,8 @@ const RELEASE_BATCH_SIZE = 4;
 const RELEASE_BATCH_INTERVAL = 0.078;
 const GALAXY_SURFACE_Y = -1.9;
 const BOTTLE_MOUTH_Y = 1.56;
+const PET_SPRITE_BRIGHTNESS = 1.08;
+const PET_SPRITE_SIZE = 0.76;
 
 export const EMOTION_STYLES = Object.freeze({
   joy: Object.freeze({ level: 1, label: "开心", color: 0xf28a32 }),
@@ -212,8 +214,9 @@ export class StarBottleScene {
     this.petSpritePose = "idle";
     this.petSpriteWalking = false;
     this.petSpriteDirection = "right";
+    this.petSpriteAssetUrl = "";
     this.petTextureCache = new Map();
-    this.petTextureRequest = 0;
+    this.petTextureLoads = new Set();
     this.pointerType = "mouse";
     this.bottleRetired = false;
     const configuredLayoutSeed = Number(options.layoutSeed);
@@ -353,23 +356,35 @@ export class StarBottleScene {
       alphaTest: 0.025,
       depthTest: true,
       depthWrite: false,
+      fog: false,
+      toneMapped: false,
     });
+    material.color.setRGB(PET_SPRITE_BRIGHTNESS, PET_SPRITE_BRIGHTNESS, PET_SPRITE_BRIGHTNESS);
     this.petSprite = new THREE.Sprite(material);
     this.petSprite.name = "galaxy-pet";
     this.petSprite.visible = false;
     this.petSprite.renderOrder = 4;
-    this.petSprite.scale.set(0.76, 0.76, 1);
+    this.petSprite.scale.set(PET_SPRITE_SIZE, PET_SPRITE_SIZE, 1);
     this.scene.add(this.petSprite);
+
     this.setPetSpritePose("idle", "/pet/idle.png");
   }
 
   setPetSpritePose(pose = "idle", assetUrl = "") {
-    this.petSpritePose = String(pose || "idle");
+    const normalizedPose = String(pose || "idle").trim().toLowerCase();
+    this.petSpritePose = normalizedPose;
+    const poseDirection = normalizedPose.match(/(?:^|[-_])(left|right)$/)?.[1];
+    if (poseDirection) this.petSpriteDirection = poseDirection;
     const url = String(assetUrl || "").trim();
     if (!url || !this.petTextureLoader || !this.petSprite?.material) return false;
-    const request = ++this.petTextureRequest;
+    if (url !== this.petSpriteAssetUrl) this.petSpriteAssetUrl = url;
     const install = (texture) => {
-      if (!texture || request !== this.petTextureRequest || !this.petSprite?.material) return;
+      if (
+        !texture ||
+        this.destroyed ||
+        url !== this.petSpriteAssetUrl ||
+        !this.petSprite?.material
+      ) return;
       if (this.THREE.SRGBColorSpace) texture.colorSpace = this.THREE.SRGBColorSpace;
       texture.needsUpdate = true;
       this.petSprite.material.map = texture;
@@ -380,10 +395,19 @@ export class StarBottleScene {
       install(cached);
       return true;
     }
+    if (this.petTextureLoads.has(url)) return true;
+    this.petTextureLoads.add(url);
     this.petTextureLoader.load(url, (texture) => {
+      this.petTextureLoads.delete(url);
+      if (this.destroyed) {
+        texture?.dispose?.();
+        return;
+      }
       this.petTextureCache.set(url, texture);
       install(texture);
-    }, undefined, () => {});
+    }, undefined, () => {
+      this.petTextureLoads.delete(url);
+    });
     return true;
   }
 
@@ -401,23 +425,29 @@ export class StarBottleScene {
 
   _updatePetSprite() {
     if (!this.petSprite || !this.petWorldPosition) return;
-    const baseWidth = 0.76;
-    const baseHeight = 0.76;
+    const baseWidth = PET_SPRITE_SIZE;
+    const baseHeight = PET_SPRITE_SIZE;
     const phase = this.elapsed * 12;
     const bob = this.petSpriteWalking ? Math.abs(Math.sin(phase)) * 0.055 : 0;
     const squash = this.petSpriteWalking ? Math.sin(phase * 2) * 0.018 : 0;
+    // Direction-specific artwork already contains its facing direction. Only
+    // mirror neutral poses that rely on the walking direction supplied by the
+    // controller; otherwise a push-left sprite would be flipped back right.
+    const poseHasDirection = /(?:^|[-_])(left|right)$/.test(this.petSpritePose);
+    const directionScale = !poseHasDirection && this.petSpriteDirection === "left" ? -1 : 1;
     this.petSprite.position.set(
       this.petWorldPosition.x,
       this.petWorldPosition.y + baseHeight * 0.5 + bob,
       this.petWorldPosition.z,
     );
     this.petSprite.scale.set(
-      (this.petSpriteDirection === "left" ? -1 : 1) * (baseWidth + squash),
+      directionScale * (baseWidth + squash),
       baseHeight - squash,
       1,
     );
     this.petSprite.material.rotation = this.petSpriteWalking ? Math.sin(phase) * 0.035 : 0;
     this.petSprite.visible = this.petSpriteVisible;
+
   }
 
   _setupWorld() {
@@ -3271,6 +3301,8 @@ export class StarBottleScene {
     this.clearPetWorldPosition();
     for (const texture of this.petTextureCache.values()) texture.dispose?.();
     this.petTextureCache.clear();
+    this.petTextureLoads.clear();
+    this.petSpriteAssetUrl = "";
   }
 }
 
