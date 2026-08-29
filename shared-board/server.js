@@ -8,6 +8,20 @@ const {
   featureForPath,
   listPublicFeatures,
 } = require("./lib/feature-registry");
+const {
+  MAX_ANNOUNCEMENT_LENGTH,
+  MAX_FEATURE_DESCRIPTION_LENGTH,
+  MAX_FEATURE_TITLE_LENGTH,
+  MAX_PORTAL_ACTIVITY_ENTRIES,
+  MAX_VISITOR_NAME_LENGTH,
+  MAX_VISITOR_REMARK_LENGTH,
+  PORTAL_ACCENTS,
+  PORTAL_VISITOR_ID_PATTERN,
+  emptyPortalActivityDocument,
+  emptyPortalSettingsDocument,
+  normalizePortalActivityDocument,
+  normalizePortalSettingsDocument,
+} = require("./lib/portal-state");
 
 const ROOT = __dirname;
 const DEFAULT_PUBLIC_DIR = path.join(ROOT, "public");
@@ -22,6 +36,8 @@ const MAX_NOTE_LENGTH = 2000;
 const MAX_NOTE_COUNT = 500;
 const MIN_NOTE_COUNT = 1;
 const MAX_ACTIVITY_ENTRIES = 5000;
+const PORTAL_ACTIVITY_WINDOW_MS = 60 * 1000;
+const PORTAL_ACTIVITY_LIMIT = 180;
 const MAX_OWNER_DEVICES = 100;
 const MAX_FAVORITES = 500;
 const MAX_CUSTOM_EMOTION_LABEL_LENGTH = 24;
@@ -34,6 +50,8 @@ const WRONG_HIT_WINDOW_MS = 60 * 1000;
 const WRONG_HIT_LIMIT = 240;
 const WRONG_VISITOR_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{3,127}$/;
 const SESSION_COOKIE = "star_bottle_owner";
+const PORTAL_VISITOR_COOKIE = "myuan_portal_visitor";
+const PORTAL_VISITOR_COOKIE_SECONDS = 365 * 24 * 60 * 60;
 const DEFAULT_SESSION_HOURS = 12;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_ATTEMPT_LIMIT = 10;
@@ -297,9 +315,16 @@ function safeEqual(left, right) {
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
 }
 
+function isLoopbackAddress(value) {
+  const address = String(value || "").trim().toLowerCase();
+  return address === "::1" || address.startsWith("127.") || address.startsWith("::ffff:127.");
+}
+
 function requestIsSecure(request) {
+  if (request.socket.encrypted) return true;
+  if (!isLoopbackAddress(request.socket.remoteAddress)) return false;
   const forwardedProtocol = request.headers["x-forwarded-proto"];
-  return request.socket.encrypted || String(forwardedProtocol).split(",")[0].trim() === "https";
+  return String(forwardedProtocol).split(",").at(-1).trim() === "https";
 }
 
 function sessionCookie(token, request, maxAgeSeconds) {
@@ -314,9 +339,28 @@ function sessionCookie(token, request, maxAgeSeconds) {
   return parts.join("; ");
 }
 
+function portalVisitorCookie(visitorId, request) {
+  const parts = [
+    `${PORTAL_VISITOR_COOKIE}=${visitorId}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${PORTAL_VISITOR_COOKIE_SECONDS}`,
+  ];
+  if (requestIsSecure(request)) parts.push("Secure");
+  return parts.join("; ");
+}
+
 function clientAddress(request) {
-  const forwarded = request.headers["cf-connecting-ip"] || request.headers["x-forwarded-for"];
-  return String(forwarded || request.socket.remoteAddress || "unknown").split(",")[0].trim();
+  const peerAddress = String(request.socket.remoteAddress || "unknown").trim();
+  if (!isLoopbackAddress(peerAddress)) return peerAddress;
+  const cloudflareAddress = String(request.headers["cf-connecting-ip"] || "").trim();
+  if (cloudflareAddress) return cloudflareAddress;
+  const forwardedAddresses = String(request.headers["x-forwarded-for"] || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return forwardedAddresses.at(-1) || peerAddress;
 }
 
 function normalizeCustomEmotionLabel(value) {
@@ -711,6 +755,39 @@ function readActivity(activityFile) {
   }
 }
 
+function readPortalSettings(settingsFile, featureIds) {
+  try {
+    return normalizePortalSettingsDocument(
+      JSON.parse(fs.readFileSync(settingsFile, "utf8")),
+      featureIds,
+    );
+  } catch (error) {
+    if (error.code === "ENOENT") return emptyPortalSettingsDocument();
+    throw error;
+  }
+}
+
+function readPortalActivity(activityFile, featurePaths) {
+  try {
+    return normalizePortalActivityDocument(
+      JSON.parse(fs.readFileSync(activityFile, "utf8")),
+      featurePaths,
+    );
+  } catch (error) {
+    if (error.code === "ENOENT") return emptyPortalActivityDocument();
+    throw error;
+  }
+}
+
+function plainObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function assertOnlyKeys(value, allowedKeys, label) {
+  const unexpected = Object.keys(value).find((key) => !allowedKeys.has(key));
+  if (unexpected) throw requestError(`${label}包含不支持的字段：${unexpected}`);
+}
+
 function emptyOwnerDevicesDocument() {
   return { version: 1, updatedAt: new Date().toISOString(), devices: [] };
 }
@@ -809,6 +886,13 @@ function createStarBottleServer(options = {}) {
   const enabledFeatureIds = new Set(
     featureRegistry.filter((feature) => feature.enabled).map((feature) => feature.id),
   );
+  const registeredFeatureIds = new Set(featureRegistry.map((feature) => feature.id));
+  const registeredFeaturePathsById = new Map(
+    featureRegistry.map((feature) => [feature.id, feature.path]),
+  );
+  const registeredFeatureByEntry = new Map(
+    featureRegistry.map((feature) => [feature.entry, feature]),
+  );
   const dataDir = options.dataDir || DEFAULT_DATA_DIR;
   const notesFile = path.join(dataDir, "notes.json");
   const settingsFile = path.join(dataDir, "settings.json");
@@ -817,6 +901,8 @@ function createStarBottleServer(options = {}) {
   const favoritesFile = path.join(dataDir, "favorites.json");
   const loveStarsMessagesFile = path.join(dataDir, "love-stars-messages.json");
   const wrongCounterFile = path.join(dataDir, "wrong-counter.json");
+  const portalSettingsFile = path.join(dataDir, "portal-settings.json");
+  const portalActivityFile = path.join(dataDir, "portal-activity.json");
   const settings = readSettings(settingsFile, options.ownerPassword);
   let notesDocument = readNotes(notesFile);
   let notesSignature = JSON.stringify(notesDocument);
@@ -826,6 +912,8 @@ function createStarBottleServer(options = {}) {
   let favoritesSignature = JSON.stringify(favoritesDocument);
   let loveStarsMessagesDocument = readLoveStarsMessages(loveStarsMessagesFile);
   let wrongCounterDocument = readWrongCounter(wrongCounterFile);
+  let portalSettingsDocument = readPortalSettings(portalSettingsFile, registeredFeatureIds);
+  let portalActivityDocument = readPortalActivity(portalActivityFile, registeredFeaturePathsById);
   let watcher = null;
   let reloadTimer = null;
   let favoritesReloadTimer = null;
@@ -836,6 +924,7 @@ function createStarBottleServer(options = {}) {
   const favoriteAttempts = new Map();
   const loveStarsMessageAttempts = new Map();
   const wrongHitAttempts = new Map();
+  const portalActivityAttempts = new Map();
   const eventClients = new Map();
   let favoritesWriteQueue = Promise.resolve();
 
@@ -850,6 +939,16 @@ function createStarBottleServer(options = {}) {
       sessions.delete(token);
     }
     return null;
+  }
+
+  function portalVisitorFor(request, { create = true } = {}) {
+    const existing = parseCookies(request.headers.cookie).get(PORTAL_VISITOR_COOKIE) || "";
+    if (PORTAL_VISITOR_ID_PATTERN.test(existing)) return { id: existing, created: false };
+    if (!create) return { id: "", created: false };
+    return {
+      id: `portal_${crypto.randomBytes(18).toString("base64url")}`,
+      created: true,
+    };
   }
 
   function sendEvent(response, eventName, payload) {
@@ -906,6 +1005,28 @@ function createStarBottleServer(options = {}) {
       "敲打计数",
     );
     wrongCounterDocument = persisted;
+    return persisted;
+  }
+
+  function savePortalSettings(nextDocument) {
+    const persisted = writeJsonFileSafely(
+      portalSettingsFile,
+      nextDocument,
+      (raw) => normalizePortalSettingsDocument(raw, registeredFeatureIds),
+      "主页设置",
+    );
+    portalSettingsDocument = persisted;
+    return persisted;
+  }
+
+  function savePortalActivity(nextDocument) {
+    const persisted = writeJsonFileSafely(
+      portalActivityFile,
+      nextDocument,
+      (raw) => normalizePortalActivityDocument(raw, registeredFeaturePathsById),
+      "主页访问记录",
+    );
+    portalActivityDocument = persisted;
     return persisted;
   }
 
@@ -1001,6 +1122,16 @@ function createStarBottleServer(options = {}) {
     return recent.length > 180;
   }
 
+  function portalActivityRateLimited(request) {
+    const address = clientAddress(request);
+    const now = Date.now();
+    const recent = (portalActivityAttempts.get(address) || [])
+      .filter((time) => now - time < PORTAL_ACTIVITY_WINDOW_MS);
+    recent.push(now);
+    portalActivityAttempts.set(address, recent);
+    return recent.length > PORTAL_ACTIVITY_LIMIT;
+  }
+
   function favoriteRateLimited(request) {
     const address = clientAddress(request);
     const now = Date.now();
@@ -1028,6 +1159,189 @@ function createStarBottleServer(options = {}) {
     recent.push(now);
     wrongHitAttempts.set(address, recent);
     return recent.length > WRONG_HIT_LIMIT;
+  }
+
+  function portalVisitorIsOwner(request, visitorId) {
+    return Boolean(sessionFor(request)) || ownerDevicesDocument.devices.some((device) => device.id === visitorId);
+  }
+
+  function recordPortalPageActivity(request, visitorId, feature = null) {
+    if (request.method !== "GET" || portalVisitorIsOwner(request, visitorId)) return false;
+    if (portalActivityRateLimited(request)) return false;
+    const at = new Date().toISOString();
+    const event = {
+      id: crypto.randomUUID(),
+      visitorId,
+      type: feature ? "feature-open" : "visit",
+      featureId: feature?.id || null,
+      path: feature?.path || "/home",
+      at,
+    };
+    try {
+      savePortalActivity({
+        version: portalActivityDocument.version + 1,
+        updatedAt: at,
+        entries: [...portalActivityDocument.entries, event].slice(-MAX_PORTAL_ACTIVITY_ENTRIES),
+      });
+      return true;
+    } catch (error) {
+      console.error(`[portal] Could not record ${event.path}: ${error.message}`);
+      return false;
+    }
+  }
+
+  function recordRegisteredEntryActivity(request, visitorId, pathname) {
+    const normalizedPath = pathname.length > 1 && pathname.endsWith("/")
+      ? pathname.slice(0, -1)
+      : pathname;
+    const feature = registeredFeatureByEntry.get(normalizedPath) || null;
+    const isPortalEntry = normalizedPath === PORTAL_ENTRY;
+    if (!feature && !isPortalEntry) return false;
+    return recordPortalPageActivity(request, visitorId, feature);
+  }
+
+  function forgetPortalVisitor(visitorId) {
+    if (!PORTAL_VISITOR_ID_PATTERN.test(visitorId)) return;
+    const remainingEntries = portalActivityDocument.entries.filter((entry) => entry.visitorId !== visitorId);
+    if (remainingEntries.length !== portalActivityDocument.entries.length) {
+      savePortalActivity({
+        version: portalActivityDocument.version + 1,
+        updatedAt: new Date().toISOString(),
+        entries: remainingEntries,
+      });
+    }
+    if (Object.prototype.hasOwnProperty.call(portalSettingsDocument.visitorLabels, visitorId)) {
+      const visitorLabels = { ...portalSettingsDocument.visitorLabels };
+      delete visitorLabels[visitorId];
+      savePortalSettings({
+        version: portalSettingsDocument.version + 1,
+        updatedAt: new Date().toISOString(),
+        announcement: portalSettingsDocument.announcement,
+        features: portalSettingsDocument.features,
+        visitorLabels,
+      });
+    }
+  }
+
+  function publicPortalAnnouncement() {
+    const text = portalSettingsDocument.announcement.text;
+    const enabled = portalSettingsDocument.announcement.enabled && Boolean(text);
+    return { enabled, text: enabled ? text : "" };
+  }
+
+  function publicPortalFeatures() {
+    return listPublicFeatures(featureRegistry).map((feature) => {
+      const override = portalSettingsDocument.features[feature.id];
+      return {
+        ...feature,
+        title: override?.title || feature.title,
+        description: override?.description || feature.description,
+        featured: override?.featured === true,
+        accent: PORTAL_ACCENTS.has(override?.accent) ? override.accent : "default",
+      };
+    });
+  }
+
+  function ownerPortalSettings() {
+    const featureSettings = {};
+    for (const feature of featureRegistry.filter((candidate) => candidate.enabled)) {
+      const override = portalSettingsDocument.features[feature.id];
+      featureSettings[feature.id] = {
+        title: override?.title || "",
+        description: override?.description || "",
+        featured: override?.featured === true,
+        accent: PORTAL_ACCENTS.has(override?.accent) ? override.accent : "default",
+      };
+    }
+    return {
+      version: portalSettingsDocument.version,
+      updatedAt: portalSettingsDocument.updatedAt,
+      announcement: { ...portalSettingsDocument.announcement },
+      features: featureSettings,
+    };
+  }
+
+  function portalVisitorSummaries() {
+    const summaries = new Map();
+    for (const [id, label] of Object.entries(portalSettingsDocument.visitorLabels)) {
+      summaries.set(id, {
+        id,
+        name: label.name,
+        remark: label.remark,
+        firstSeenAt: "",
+        lastSeenAt: "",
+        visitCount: 0,
+        featureOpenCount: 0,
+        totalEvents: 0,
+        lastFeatureId: null,
+        featureCounts: {},
+      });
+    }
+    for (const entry of portalActivityDocument.entries) {
+      const label = portalSettingsDocument.visitorLabels[entry.visitorId] || {};
+      const summary = summaries.get(entry.visitorId) || {
+        id: entry.visitorId,
+        name: label.name || "",
+        remark: label.remark || "",
+        firstSeenAt: entry.at,
+        lastSeenAt: entry.at,
+        visitCount: 0,
+        featureOpenCount: 0,
+        totalEvents: 0,
+        lastFeatureId: null,
+        featureCounts: {},
+      };
+      if (!summary.firstSeenAt || entry.at < summary.firstSeenAt) summary.firstSeenAt = entry.at;
+      if (!summary.lastSeenAt || entry.at >= summary.lastSeenAt) {
+        summary.lastSeenAt = entry.at;
+        if (entry.featureId) summary.lastFeatureId = entry.featureId;
+      }
+      summary.totalEvents += 1;
+      if (entry.type === "visit") summary.visitCount += 1;
+      if (entry.type === "feature-open") {
+        summary.featureOpenCount += 1;
+        summary.featureCounts[entry.featureId] = (summary.featureCounts[entry.featureId] || 0) + 1;
+      }
+      summaries.set(entry.visitorId, summary);
+    }
+    return [...summaries.values()]
+      .map((summary) => ({
+        ...summary,
+        visitorId: summary.id,
+        eventCount: summary.totalEvents,
+      }))
+      .sort((left, right) =>
+        String(right.lastSeenAt).localeCompare(String(left.lastSeenAt)) || left.id.localeCompare(right.id),
+      );
+  }
+
+  function ownerPortalSnapshot() {
+    const features = publicPortalFeatures();
+    const featureById = new Map(features.map((feature) => [feature.id, feature]));
+    const entries = portalActivityDocument.entries.slice().reverse().map((entry) => {
+      const label = portalSettingsDocument.visitorLabels[entry.visitorId] || {};
+      const feature = entry.featureId ? featureById.get(entry.featureId) : null;
+      return {
+        ...entry,
+        visitorName: label.name || "",
+        visitorRemark: label.remark || "",
+        featureTitle: feature?.title || "",
+        feature: feature
+          ? { id: feature.id, title: feature.title, path: feature.path }
+          : null,
+      };
+    });
+    return {
+      settings: ownerPortalSettings(),
+      features,
+      visitors: portalVisitorSummaries(),
+      activity: {
+        version: portalActivityDocument.version,
+        updatedAt: portalActivityDocument.updatedAt,
+        limit: MAX_PORTAL_ACTIVITY_ENTRIES,
+        entries,
+      },
+    };
   }
 
   function safeRegisteredEntry(entry) {
@@ -1073,13 +1387,21 @@ function createStarBottleServer(options = {}) {
     const normalizedPath = pathname.length > 1 && pathname.endsWith("/")
       ? pathname.slice(0, -1)
       : pathname;
+    const feature = normalizedPath === "/home"
+      ? null
+      : featureForPath(normalizedPath, featureRegistry);
     const entry = normalizedPath === "/home"
       ? PORTAL_ENTRY
-      : featureForPath(normalizedPath, featureRegistry)?.entry;
+      : feature?.entry;
     if (!entry) return false;
 
     const entryPath = await resolveRegisteredEntry(entry);
     if (!entryPath) return false;
+    if (request.method === "GET") {
+      const visitor = portalVisitorFor(request);
+      if (visitor.created) response.setHeader("Set-Cookie", portalVisitorCookie(visitor.id, request));
+      recordPortalPageActivity(request, visitor.id, feature);
+    }
     return serveFile(request, response, entryPath);
   }
 
@@ -1088,7 +1410,8 @@ function createStarBottleServer(options = {}) {
     if (featureCatalogPath && (request.method === "GET" || request.method === "HEAD")) {
       writeJson(response, 200, {
         version: 1,
-        features: listPublicFeatures(featureRegistry),
+        announcement: publicPortalAnnouncement(),
+        features: publicPortalFeatures(),
       }, { Allow: "GET, HEAD, OPTIONS" });
       return true;
     }
@@ -1535,6 +1858,192 @@ function createStarBottleServer(options = {}) {
       return true;
     }
 
+    const ownerPortalPath = pathname === "/api/owner/portal" || pathname === "/api/owner/portal/";
+    if (ownerPortalPath && request.method === "GET") {
+      if (!sessionFor(request)) {
+        writeJson(response, 401, { error: "Owner login required" });
+        return true;
+      }
+      writeJson(response, 200, ownerPortalSnapshot(), { Allow: "GET" });
+      return true;
+    }
+    if (ownerPortalPath) {
+      writeJson(response, 405, { error: "GET is required" }, { Allow: "GET" });
+      return true;
+    }
+
+    const ownerPortalSettingsPath = pathname === "/api/owner/portal/settings" ||
+      pathname === "/api/owner/portal/settings/";
+    if (ownerPortalSettingsPath && request.method === "PUT") {
+      if (!sessionFor(request)) {
+        writeJson(response, 401, { error: "Owner login required" });
+        return true;
+      }
+      try {
+        const body = await readJsonBody(request);
+        if (!plainObject(body)) throw requestError("主页设置格式不正确");
+        assertOnlyKeys(body, new Set(["announcement", "features"]), "主页设置");
+
+        let announcement = { ...portalSettingsDocument.announcement };
+        if (body.announcement !== undefined) {
+          if (!plainObject(body.announcement)) throw requestError("公告设置格式不正确");
+          assertOnlyKeys(body.announcement, new Set(["enabled", "text"]), "公告设置");
+          if (body.announcement.enabled !== undefined && typeof body.announcement.enabled !== "boolean") {
+            throw requestError("公告启用状态必须是 true 或 false");
+          }
+          if (body.announcement.text !== undefined && typeof body.announcement.text !== "string") {
+            throw requestError("公告内容必须是文本");
+          }
+          if (
+            typeof body.announcement.text === "string" &&
+            body.announcement.text.trim().length > MAX_ANNOUNCEMENT_LENGTH
+          ) {
+            throw requestError(`公告不能超过 ${MAX_ANNOUNCEMENT_LENGTH} 个字符`);
+          }
+          announcement = {
+            enabled: body.announcement.enabled ?? announcement.enabled,
+            text: body.announcement.text === undefined
+              ? announcement.text
+              : body.announcement.text.trim(),
+          };
+          if (announcement.enabled && !announcement.text) throw requestError("启用公告前请填写公告内容");
+        }
+
+        const features = { ...portalSettingsDocument.features };
+        if (body.features !== undefined) {
+          if (!plainObject(body.features)) throw requestError("功能设置格式不正确");
+          for (const [featureId, submitted] of Object.entries(body.features)) {
+            if (!registeredFeatureIds.has(featureId)) throw requestError(`找不到功能：${featureId}`, 404);
+            if (!plainObject(submitted)) throw requestError(`功能 ${featureId} 的设置格式不正确`);
+            assertOnlyKeys(
+              submitted,
+              new Set(["title", "description", "featured", "accent"]),
+              `功能 ${featureId} 的设置`,
+            );
+            const current = features[featureId] || {
+              title: "",
+              description: "",
+              featured: false,
+              accent: "default",
+            };
+            if (submitted.title !== undefined && typeof submitted.title !== "string") {
+              throw requestError(`功能 ${featureId} 的名称必须是文本`);
+            }
+            if (typeof submitted.title === "string" && submitted.title.trim().length > MAX_FEATURE_TITLE_LENGTH) {
+              throw requestError(`功能名称不能超过 ${MAX_FEATURE_TITLE_LENGTH} 个字符`);
+            }
+            if (submitted.description !== undefined && typeof submitted.description !== "string") {
+              throw requestError(`功能 ${featureId} 的说明必须是文本`);
+            }
+            if (
+              typeof submitted.description === "string" &&
+              submitted.description.trim().length > MAX_FEATURE_DESCRIPTION_LENGTH
+            ) {
+              throw requestError(`功能说明不能超过 ${MAX_FEATURE_DESCRIPTION_LENGTH} 个字符`);
+            }
+            if (submitted.featured !== undefined && typeof submitted.featured !== "boolean") {
+              throw requestError(`功能 ${featureId} 的重点状态必须是 true 或 false`);
+            }
+            if (submitted.accent !== undefined && !PORTAL_ACCENTS.has(submitted.accent)) {
+              throw requestError(`功能 ${featureId} 的强调色无效`);
+            }
+            features[featureId] = {
+              title: submitted.title === undefined ? current.title : submitted.title.trim(),
+              description: submitted.description === undefined
+                ? current.description
+                : submitted.description.trim(),
+              featured: submitted.featured ?? current.featured,
+              accent: submitted.accent ?? current.accent,
+            };
+          }
+        }
+
+        const persisted = savePortalSettings({
+          version: portalSettingsDocument.version + 1,
+          updatedAt: new Date().toISOString(),
+          announcement,
+          features,
+          visitorLabels: portalSettingsDocument.visitorLabels,
+        });
+        writeJson(response, 200, {
+          saved: true,
+          version: persisted.version,
+          settings: ownerPortalSettings(),
+          features: publicPortalFeatures(),
+        }, { Allow: "PUT" });
+      } catch (error) {
+        writeJson(response, error.statusCode || 400, {
+          error: error.message || "主页设置保存失败",
+          code: error.storageCode,
+        });
+      }
+      return true;
+    }
+    if (ownerPortalSettingsPath) {
+      writeJson(response, 405, { error: "PUT is required" }, { Allow: "PUT" });
+      return true;
+    }
+
+    const portalVisitorMatch = pathname.match(/^\/api\/owner\/portal\/visitors\/([A-Za-z0-9_-]{8,80})$/);
+    if (portalVisitorMatch && request.method === "PUT") {
+      if (!sessionFor(request)) {
+        writeJson(response, 401, { error: "Owner login required" });
+        return true;
+      }
+      try {
+        const visitorId = portalVisitorMatch[1];
+        const knownVisitor = portalActivityDocument.entries.some((entry) => entry.visitorId === visitorId) ||
+          Object.prototype.hasOwnProperty.call(portalSettingsDocument.visitorLabels, visitorId);
+        if (!knownVisitor) throw requestError("找不到这位访客", 404);
+        const body = await readJsonBody(request);
+        if (!plainObject(body)) throw requestError("访客备注格式不正确");
+        assertOnlyKeys(body, new Set(["name", "remark"]), "访客备注");
+        const current = portalSettingsDocument.visitorLabels[visitorId] || { name: "", remark: "" };
+        if (body.name !== undefined && typeof body.name !== "string") {
+          throw requestError("访客名称必须是文本");
+        }
+        if (typeof body.name === "string" && body.name.trim().length > MAX_VISITOR_NAME_LENGTH) {
+          throw requestError(`访客名称不能超过 ${MAX_VISITOR_NAME_LENGTH} 个字符`);
+        }
+        if (body.remark !== undefined && typeof body.remark !== "string") {
+          throw requestError("访客备注必须是文本");
+        }
+        if (typeof body.remark === "string" && body.remark.trim().length > MAX_VISITOR_REMARK_LENGTH) {
+          throw requestError(`访客备注不能超过 ${MAX_VISITOR_REMARK_LENGTH} 个字符`);
+        }
+        const label = {
+          name: body.name === undefined ? current.name : body.name.trim(),
+          remark: body.remark === undefined ? current.remark : body.remark.trim(),
+        };
+        const visitorLabels = { ...portalSettingsDocument.visitorLabels };
+        if (label.name || label.remark) visitorLabels[visitorId] = label;
+        else delete visitorLabels[visitorId];
+        const persisted = savePortalSettings({
+          version: portalSettingsDocument.version + 1,
+          updatedAt: new Date().toISOString(),
+          announcement: portalSettingsDocument.announcement,
+          features: portalSettingsDocument.features,
+          visitorLabels,
+        });
+        const visitor = portalVisitorSummaries().find((candidate) => candidate.id === visitorId);
+        writeJson(response, 200, {
+          saved: true,
+          version: persisted.version,
+          visitor,
+        }, { Allow: "PUT" });
+      } catch (error) {
+        writeJson(response, error.statusCode || 400, {
+          error: error.message || "访客备注保存失败",
+          code: error.storageCode,
+        });
+      }
+      return true;
+    }
+    if (portalVisitorMatch) {
+      writeJson(response, 405, { error: "PUT is required" }, { Allow: "PUT" });
+      return true;
+    }
+
     if (pathname === "/api/owner/activity" && request.method === "GET") {
       if (!sessionFor(request)) {
         writeJson(response, 401, { error: "Owner login required" });
@@ -1666,10 +2175,16 @@ function createStarBottleServer(options = {}) {
         }
 
         clearFailedLogins(request);
+        const submittedVisitorId = typeof body.visitorId === "string" ? body.visitorId.trim() : "";
+        const portalVisitorId = portalVisitorFor(request, { create: false }).id;
         await registerOwnerDevice(
-          typeof body.visitorId === "string" ? body.visitorId.trim() : "",
+          submittedVisitorId,
           typeof body.deviceLabel === "string" ? body.deviceLabel : "主人设备",
         );
+        if (portalVisitorId && portalVisitorId !== submittedVisitorId) {
+          await registerOwnerDevice(portalVisitorId, "功能中心");
+        }
+        forgetPortalVisitor(portalVisitorId);
         const token = crypto.randomBytes(32).toString("base64url");
         const sessionSeconds = settings.sessionHours * 60 * 60;
         sessions.set(token, { expiresAt: Date.now() + sessionSeconds * 1000 });
@@ -1952,6 +2467,14 @@ function createStarBottleServer(options = {}) {
       const realCandidate = await fs.promises.realpath(candidate);
       const realRelative = path.relative(realPublicDir, realCandidate);
       if (realRelative.startsWith("..") || path.isAbsolute(realRelative)) return false;
+      if (
+        request.method === "GET" &&
+        (normalizedDecodedPath === PORTAL_ENTRY || registeredFeatureByEntry.has(normalizedDecodedPath))
+      ) {
+        const visitor = portalVisitorFor(request);
+        if (visitor.created) response.setHeader("Set-Cookie", portalVisitorCookie(visitor.id, request));
+        recordRegisteredEntryActivity(request, visitor.id, normalizedDecodedPath);
+      }
       return serveFile(request, response, realCandidate);
     } catch (error) {
       if (error.code === "ENOENT" || error.code === "ENOTDIR") return false;
@@ -2004,6 +2527,11 @@ function createStarBottleServer(options = {}) {
       const recent = attempts.filter((time) => now - time < 60_000);
       if (recent.length) activityAttempts.set(address, recent);
       else activityAttempts.delete(address);
+    }
+    for (const [address, attempts] of portalActivityAttempts) {
+      const recent = attempts.filter((time) => now - time < PORTAL_ACTIVITY_WINDOW_MS);
+      if (recent.length) portalActivityAttempts.set(address, recent);
+      else portalActivityAttempts.delete(address);
     }
     for (const [address, attempts] of favoriteAttempts) {
       const recent = attempts.filter((time) => now - time < 60_000);

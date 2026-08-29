@@ -12,6 +12,10 @@
 
 功能中心通过 `GET /api/features` 读取功能目录。页面入口、导航和服务端路由都来自 `config/features.js`，不会把内部文件路径返回给浏览器。
 
+功能中心右上角的“功能中心”在 2.6 秒内连续点击 4 次会打开隐藏的站长入口。它使用和星星瓶相同的站长密码与登录会话；登录后可以查看匿名浏览器的主页访问和功能打开记录、填写访客称呼与备注、发布公告，以及修改卡片标题、说明、重点标记和强调色。详细操作见本机的 `OWNER-ACCESS.txt`。
+
+主页展示设置保存到 `data/portal-settings.json`，访问活动保存到 `data/portal-activity.json`。服务端会在访客实际请求 `/home` 或已注册功能页面时记录活动，并用 HttpOnly Cookie 分配匿名浏览器 ID；该标识不等同于真实身份。动态设置只覆盖公开展示字段，不会改变 `config/features.js` 中固定的 `path` 或服务器内部 `entry`。
+
 两个独立功能各自使用命名空间 API 和数据文件：
 
 - 七夕星空情书：`/api/love-stars/message`，数据保存到 `data/love-stars-messages.json`。
@@ -39,6 +43,8 @@
 
 3. 运行 `npm test`，确认注册表校验、页面路由和原有星星瓶功能都通过。
 
+注册后，功能会自动出现在 `/home` 和站长的“主页设置”中，不需要为每个新功能再修改门户脚本或增加服务端路由分支。
+
 `id`、`path` 和 `entry` 必须唯一；`path` 不能使用 `/api`、`/home`、`/portal`、`/vendor`、`/music`、`/pet` 等保留前缀；`enabled: false` 会同时隐藏入口并阻断页面及其目录资源直达。服务端还会校验注册入口的真实路径仍位于 `public/` 内。
 
 ## 目录结构
@@ -46,13 +52,17 @@
 ```text
 config/features.js       功能注册表（新增功能从这里接入）
 lib/feature-registry.js   注册表校验与公开数据投影
+lib/portal-state.js       主页设置和访问活动的数据校验
 public/portal/            功能中心页面、样式和脚本
 public/index.html         星星瓶页面（保留根级资源兼容路径）
 public/love-stars/        七夕星空情书页面及资源
 public/wrong/             严格教育现场页面、Matter.js 和图片资源
 data/love-stars-messages.json  七夕留言运行数据（不提交）
 data/wrong-counter.json        敲打统计运行数据（不提交）
+data/portal-settings.json      主页公告、卡片覆盖和访客备注（不提交）
+data/portal-activity.json      主页访问与功能打开记录（不提交）
 test-portal.js             门户与注册表测试
+test-portal-admin.js       主页访问记录和站长管理测试
 test-love-stars.js         七夕功能/API 测试
 test-wrong.js              严格教育现场/API 测试
 ```
@@ -91,7 +101,7 @@ Public URL: https://...trycloudflare.com
 
 收藏保存在服务器的 `data/favorites.json`。任意设备收藏或取消后，所有在线设备会自动更新；旧浏览器中已有的本地收藏会在首次打开新版网站时迁移一次。
 
-迁移到其他服务器时，请一起保留整个 `data` 文件夹，其中包含纸条、收藏、打开记录、主人设备名单、设置，以及两个独立功能的留言和敲打统计。
+迁移到其他服务器时，请一起保留整个 `data` 文件夹，其中包含纸条、收藏、打开记录、主人设备名单、主页公告与访客备注，以及两个独立功能的留言和敲打统计。
 
 ## 运行条件
 

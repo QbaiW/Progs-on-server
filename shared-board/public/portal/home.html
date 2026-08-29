@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#11120f">
     <meta name="description" content="选择并进入 QE 给圆圆宝宝准备的网站功能。">
     <title>功能中心 | QE 给圆圆宝宝</title>
-    <link rel="stylesheet" href="/portal/home.css?v=20260829-portal2">
-    <script type="module" src="/portal/home.js?v=20260829-portal2"></script>
+    <link rel="stylesheet" href="/portal/home.css?v=20260829-portal4">
+    <script type="module" src="/portal/home.js?v=20260829-portal4"></script>
   </head>
   <body>
     <a class="skip-link" href="#featureGrid">跳到功能列表</a>
@@ -20,7 +20,7 @@
           <span>MYUAN.XIN</span>
         </span>
       </a>
-      <span class="current-section" aria-current="page">功能中心</span>
+      <button class="current-section" id="ownerTrigger" type="button" aria-current="page">功能中心</button>
     </header>
 
     <main class="portal-main">
@@ -30,9 +30,14 @@
         <p>这里收纳我们的网站空间。选一个入口，去想去的地方。</p>
       </section>
 
+      <section class="portal-announcement" id="portalAnnouncement" aria-labelledby="announcementTitle" hidden>
+        <p class="announcement-label" id="announcementTitle">公告</p>
+        <p class="announcement-text" id="announcementText"></p>
+      </section>
+
       <nav class="feature-navigation" aria-label="网站功能">
         <ul class="feature-grid" id="featureGrid">
-          <li class="feature-item" data-feature-id="star-bottle">
+          <li class="feature-item" data-feature-id="star-bottle" data-accent="warm">
             <a class="feature-card" href="/star-bottle">
               <span class="feature-art feature-art-star-bottle" aria-hidden="true">
                 <span class="feature-art-stars"></span>
@@ -48,7 +53,7 @@
               </span>
             </a>
           </li>
-          <li class="feature-item" data-feature-id="love-stars">
+          <li class="feature-item" data-feature-id="love-stars" data-accent="sky">
             <a class="feature-card" href="/love-stars">
               <span class="feature-art feature-art-love-stars" aria-hidden="true">
                 <span class="feature-art-dust"></span>
@@ -64,7 +69,7 @@
               </span>
             </a>
           </li>
-          <li class="feature-item" data-feature-id="wrong">
+          <li class="feature-item" data-feature-id="wrong" data-accent="rose">
             <a class="feature-card" href="/wrong">
               <span class="feature-art feature-art-wrong" aria-hidden="true">
                 <img class="feature-art-bear" src="/wrong/assets/white-bear.png" alt="" loading="lazy">
@@ -92,5 +97,91 @@
       <span aria-hidden="true">·</span>
       <span id="featureCount">3 个可用功能</span>
     </footer>
+
+    <dialog class="owner-dialog login-dialog admin-dialog" id="ownerLoginDialog" aria-labelledby="ownerLoginTitle">
+      <div class="dialog-header admin-header">
+        <div>
+          <p class="dialog-eyebrow admin-kicker">OWNER</p>
+          <h2 id="ownerLoginTitle">进入管理</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-dialog="ownerLoginDialog" aria-label="关闭登录窗口" title="关闭">×</button>
+      </div>
+      <form class="owner-login-form login-form admin-login" id="ownerLoginForm">
+        <label for="ownerPassword">管理密码</label>
+        <input id="ownerPassword" name="password" type="password" autocomplete="current-password" required>
+        <button class="primary-button" id="ownerLoginButton" type="submit">登录</button>
+        <p class="form-status" id="ownerLoginStatus" role="status" aria-live="polite"></p>
+      </form>
+    </dialog>
+
+    <dialog class="owner-dialog workspace-dialog admin-dialog" id="ownerWorkspaceDialog" aria-labelledby="ownerWorkspaceTitle">
+      <div class="dialog-header workspace-header admin-header">
+        <div>
+          <p class="dialog-eyebrow admin-kicker">OWNER</p>
+          <h2 id="ownerWorkspaceTitle">功能中心管理</h2>
+        </div>
+        <div class="dialog-actions">
+          <button class="quiet-button secondary-button" id="ownerRefreshButton" type="button">刷新</button>
+          <button class="quiet-button secondary-button" id="ownerLogoutButton" type="button">退出</button>
+          <button class="icon-button" type="button" data-close-dialog="ownerWorkspaceDialog" aria-label="关闭管理窗口" title="关闭">×</button>
+        </div>
+      </div>
+
+      <div class="workspace-layout admin-workspace">
+        <div class="workspace-tabs admin-tabs" role="tablist" aria-label="管理内容">
+          <button id="ownerTabOverview" type="button" role="tab" aria-selected="true" aria-controls="ownerPanelOverview" data-owner-tab="overview">概览活动</button>
+          <button id="ownerTabVisitors" type="button" role="tab" aria-selected="false" aria-controls="ownerPanelVisitors" data-owner-tab="visitors" tabindex="-1">访客备注</button>
+          <button id="ownerTabSettings" type="button" role="tab" aria-selected="false" aria-controls="ownerPanelSettings" data-owner-tab="settings" tabindex="-1">主页设置</button>
+        </div>
+
+        <div class="workspace-content">
+          <p class="workspace-status" id="ownerWorkspaceStatus" role="status" aria-live="polite"></p>
+
+          <section class="workspace-panel admin-panel" id="ownerPanelOverview" role="tabpanel" aria-labelledby="ownerTabOverview" data-owner-panel="overview">
+            <h3>访问概览</h3>
+            <dl class="metric-grid summary-grid" id="ownerMetrics"></dl>
+            <div class="section-heading panel-heading">
+              <h3>最近活动</h3>
+              <span id="ownerActivityUpdated"></span>
+            </div>
+            <ol class="activity-list" id="ownerActivityList"></ol>
+            <p class="empty-state" id="ownerActivityEmpty" hidden>还没有门户活动。</p>
+          </section>
+
+          <section class="workspace-panel admin-panel" id="ownerPanelVisitors" role="tabpanel" aria-labelledby="ownerTabVisitors" data-owner-panel="visitors" hidden>
+            <div class="section-heading panel-heading">
+              <h3>访客备注</h3>
+              <span id="ownerVisitorCount"></span>
+            </div>
+            <div class="visitor-list" id="ownerVisitorList"></div>
+            <p class="empty-state" id="ownerVisitorEmpty" hidden>还没有可备注的访客。</p>
+          </section>
+
+          <section class="workspace-panel admin-panel" id="ownerPanelSettings" role="tabpanel" aria-labelledby="ownerTabSettings" data-owner-panel="settings" hidden>
+            <form class="settings-form" id="ownerSettingsForm">
+              <fieldset class="settings-group">
+                <legend>首页公告</legend>
+                <label class="checkbox-label toggle-row" for="announcementEnabled">
+                  <input id="announcementEnabled" name="announcementEnabled" type="checkbox">
+                  <span>显示公告</span>
+                </label>
+                <label for="announcementInput">公告内容</label>
+                <textarea id="announcementInput" name="announcement" maxlength="500" rows="4"></textarea>
+              </fieldset>
+
+              <fieldset class="settings-group feature-settings-group">
+                <legend>功能卡片</legend>
+                <div id="ownerFeatureSettings"></div>
+              </fieldset>
+
+              <div class="settings-actions">
+                <button class="primary-button" id="ownerSettingsSaveButton" type="submit">保存主页设置</button>
+                <p class="form-status" id="ownerSettingsStatus" role="status" aria-live="polite"></p>
+              </div>
+            </form>
+          </section>
+        </div>
+      </div>
+    </dialog>
   </body>
 </html>

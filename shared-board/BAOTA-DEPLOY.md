@@ -8,7 +8,7 @@
 /www/wwwroot/qe-star-bottle
 ```
 
-可以不上传 `cloudflared.exe`、`*.ps1`、`*.cmd`、`*.log` 和 `public-url.txt`。不要删除 `data` 文件夹；其中保存纸条、收藏、访问记录和主人设备名单。
+可以不上传 `cloudflared.exe`、`*.ps1`、`*.cmd`、`*.log` 和 `public-url.txt`。不要删除 `data` 文件夹；其中保存纸条、收藏、访问记录、主人设备名单、功能数据和主页管理设置。
 
 ## 2. 安装 Node.js 和 PM2
 
@@ -73,7 +73,7 @@ pm2 logs qe-star-bottle --lines 100
 发送域名: $host
 ```
 
-打开高级配置，将 `nginx-star-bottle.conf.example` 中的 `proxy_http_version`、转发请求头、`proxy_buffering off`、`proxy_cache off`、`proxy_read_timeout 3600s` 和 `proxy_send_timeout 3600s` 加入代理配置。SSE 如果出现“已断开”或无法实时同步，优先检查这些配置。
+打开高级配置，将 `nginx-star-bottle.conf.example` 中的 `proxy_http_version`、转发请求头、`proxy_buffering off`、`proxy_cache off`、`proxy_read_timeout 3600s` 和 `proxy_send_timeout 3600s` 加入代理配置。必须让 Nginx 覆盖 `X-Forwarded-For` 并清空外部传入的 `CF-Connecting-IP`，否则登录限流可能被伪造来源头绕过。SSE 如果出现“已断开”或无法实时同步，优先检查这些配置。
 
 随后在宝塔“SSL”中申请并启用证书，再打开强制 HTTPS。HTTPS 很重要，因为主人登录使用 HttpOnly Cookie，公网环境不应使用明文 HTTP。
 
@@ -91,7 +91,13 @@ data/favorites.json
 data/activity.json
 data/owner-devices.json
 data/settings.json
+data/love-stars-messages.json
+data/wrong-counter.json
+data/portal-settings.json
+data/portal-activity.json
 ```
+
+后四个文件在对应功能首次产生数据前可能尚不存在；存在时必须一并备份。`settings.json` 或生产 `.env` 中含有站长密码，不要上传到公开仓库。
 
 更新代码后执行：
 

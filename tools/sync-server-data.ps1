@@ -21,12 +21,19 @@ if (-not $LocalDataDir) {
     $LocalDataDir = Join-Path $repoRoot "server-data\from-server"
 }
 
-$dataNames = @(
+$requiredDataNames = @(
     "notes.json",
     "favorites.json",
     "activity.json",
     "owner-devices.json"
 )
+$optionalDataNames = @(
+    "love-stars-messages.json",
+    "wrong-counter.json",
+    "portal-settings.json",
+    "portal-activity.json"
+)
+$dataNames = @($requiredDataNames + $optionalDataNames)
 
 function Fail([string]$Message) {
     throw $Message
@@ -92,6 +99,10 @@ function Test-JsonFile([string]$Path, [string]$Name) {
         "favorites.json" { "noteIds" }
         "activity.json" { "entries" }
         "owner-devices.json" { "devices" }
+        "love-stars-messages.json" { "messages" }
+        "wrong-counter.json" { "visitors" }
+        "portal-settings.json" { "features" }
+        "portal-activity.json" { "entries" }
     }
     if (-not ($document.PSObject.Properties.Name -contains $requiredProperty)) {
         Fail "$Name is missing the '$requiredProperty' property"
@@ -99,8 +110,14 @@ function Test-JsonFile([string]$Path, [string]$Name) {
 }
 
 function Test-DataDirectory([string]$Directory) {
-    foreach ($name in $dataNames) {
+    foreach ($name in $requiredDataNames) {
         Test-JsonFile (Join-Path $Directory $name) $name
+    }
+    foreach ($name in $optionalDataNames) {
+        $candidate = Join-Path $Directory $name
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            Test-JsonFile $candidate $name
+        }
     }
 }
 
@@ -121,17 +138,34 @@ function Pull-Data {
         Write-Host "Creating a server snapshot..."
         $snapshotParts = @(
             "set -eu",
-            "mkdir -m 700 -p $remoteSnapshot"
+            "mkdir -m 700 -p $remoteSnapshot",
+            ": > $remoteSnapshot/data-manifest.txt"
         )
-        foreach ($name in $dataNames) {
+        foreach ($name in $requiredDataNames) {
             $snapshotParts += "cp -p $RemoteDataDir/$name $remoteSnapshot/$name"
+            $snapshotParts += "printf '%s\n' '$name' >> $remoteSnapshot/data-manifest.txt"
+        }
+        foreach ($name in $optionalDataNames) {
+            $snapshotParts += "if [ -f $RemoteDataDir/$name ]; then cp -p $RemoteDataDir/$name $remoteSnapshot/$name; printf '%s\n' '$name' >> $remoteSnapshot/data-manifest.txt; fi"
         }
         Invoke-Ssh ($snapshotParts -join "; ")
 
-        foreach ($name in $dataNames) {
+        $localManifest = Join-Path $staging "data-manifest.txt"
+        Invoke-Scp ("{0}:{1}/data-manifest.txt" -f $Server.TrimEnd(":"), $remoteSnapshot) $localManifest
+        $downloadNames = @(
+            Get-Content -LiteralPath $localManifest -Encoding UTF8 |
+                Where-Object { $dataNames -contains $_ }
+        )
+        foreach ($name in $requiredDataNames) {
+            if ($downloadNames -notcontains $name) {
+                Fail "Server snapshot is missing required data file: $name"
+            }
+        }
+        foreach ($name in $downloadNames) {
             Write-Host "Downloading $name..."
             Invoke-Scp ("{0}:{1}/{2}" -f $Server.TrimEnd(":"), $remoteSnapshot, $name) (Join-Path $staging $name)
         }
+        Remove-Item -LiteralPath $localManifest -Force
 
         Test-DataDirectory $staging
 
@@ -158,6 +192,9 @@ function Pull-Data {
 
 function Push-Data {
     Test-DataDirectory $LocalDataDir
+    $uploadNames = @(
+        $dataNames | Where-Object { Test-Path -LiteralPath (Join-Path $LocalDataDir $_) -PathType Leaf }
+    )
     $stamp = Get-Stamp
     $runId = [guid]::NewGuid().ToString("N")
     $localBackup = Join-Path (Join-Path (Split-Path -Parent $LocalDataDir) "backups") ("before-push-" + $stamp + "-" + $runId.Substring(0, 8))
@@ -165,7 +202,7 @@ function Push-Data {
     $remoteStage = "$RemoteDataDir/.push-$stamp-$runId"
 
     Write-Host "Source data: $LocalDataDir"
-    Write-Host "This will replace the four runtime JSON files on the server."
+    Write-Host "This will replace $($uploadNames.Count) runtime JSON files on the server."
     $answer = Read-Host "Type UPLOAD to continue"
     if ($answer -cne "UPLOAD") {
         Write-Host "Upload cancelled."
@@ -179,18 +216,18 @@ function Push-Data {
         "set -eu",
         "mkdir -m 700 -p $remoteBackup $remoteStage"
     )
-    foreach ($name in $dataNames) {
+    foreach ($name in $uploadNames) {
         $prepareParts += "if [ -f $RemoteDataDir/$name ]; then cp -p $RemoteDataDir/$name $remoteBackup/$name; fi"
     }
     Invoke-Ssh ($prepareParts -join "; ")
 
     try {
-        foreach ($name in $dataNames) {
+        foreach ($name in $uploadNames) {
             Write-Host "Uploading $name..."
             Invoke-Scp (Join-Path $LocalDataDir $name) ("{0}:{1}/{2}" -f $Server.TrimEnd(":"), $remoteStage, $name)
         }
 
-        $remoteFiles = ($dataNames | ForEach-Object { "$remoteStage/$_" }) -join " "
+        $remoteFiles = ($uploadNames | ForEach-Object { "$remoteStage/$_" }) -join " "
         $nodeCode = 'const fs=require("fs"); for (const f of process.argv.slice(1)) JSON.parse(fs.readFileSync(f,"utf8"));'
         $validateCommand = "node -e '$nodeCode' $remoteFiles"
         Write-Host "Validating the server upload..."
@@ -204,7 +241,7 @@ function Push-Data {
             'pm2 stop qe-star-bottle >/dev/null 2>&1 || true',
             'stopped=1'
         )
-        foreach ($name in $dataNames) {
+        foreach ($name in $uploadNames) {
             $finishParts += "mv -f $remoteStage/$name $RemoteDataDir/$name"
             $finishParts += "chmod 600 $RemoteDataDir/$name"
         }
