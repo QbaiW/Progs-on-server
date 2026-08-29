@@ -24,14 +24,18 @@ git fetch --prune origin "$BRANCH"
 
 current="$(git rev-parse HEAD)"
 target="$(git rev-parse "origin/$BRANCH")"
-if [[ "$current" == "$target" ]]; then
-  exit 0
-fi
 
-# Local data edits are allowed, but all other local edits stop deployment.
+# Local data edits are allowed, but all other local edits stop deployment. npm
+# creates an untracked package-lock.json here because this project deliberately
+# installs from package.json without committing a lockfile.
 while IFS= read -r entry; do
   [ -z "$entry" ] && continue
+  status="${entry:0:2}"
   path="${entry:3}"
+  if [[ "$status" == "??" && "$path" == "shared-board/package-lock.json" ]]; then
+    printf '[deploy] ignoring generated untracked lockfile: %s\n' "$path"
+    continue
+  fi
   case "$path" in
     shared-board/data|shared-board/data/*) ;;
     *)
@@ -39,7 +43,12 @@ while IFS= read -r entry; do
       exit 1
       ;;
   esac
-done < <(git status --porcelain=v1)
+done < <(git status --porcelain=v1 --untracked-files=all)
+
+if [[ "$current" == "$target" ]]; then
+  printf '[deploy] already up to date at %s\n' "$(git rev-parse --short "$current")"
+  exit 0
+fi
 
 incoming_paths="$(git diff --name-only "$current" "$target")"
 while IFS= read -r path; do
@@ -64,7 +73,7 @@ git merge --ff-only "$target"
 cd "$APP_DIR"
 
 if [[ "$needs_install" == true || ! -d node_modules ]]; then
-  npm install --omit=dev --no-audit --no-fund
+  npm install --omit=dev --no-audit --no-fund --package-lock=false
 fi
 
 pm2 restart "$APP_NAME" --update-env

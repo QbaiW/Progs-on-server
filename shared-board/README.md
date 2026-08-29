@@ -114,3 +114,12 @@ Public URL: https://...trycloudflare.com
 ## 云服务器部署
 
 项目已附带 `ecosystem.config.cjs`、`.env.example`、`start-linux.sh` 和 `BAOTA-DEPLOY.md`。部署到宝塔时使用 Node.js 20/22 + PM2 + Nginx 反向代理，不需要上传 `cloudflared.exe`。详细步骤请查看 `BAOTA-DEPLOY.md`。
+
+代码更新时，在服务器仓库根目录执行：
+
+```bash
+cd /www/wwwroot/qe-star-bottle
+bash shared-board/deploy-server.sh
+```
+
+`PUSH-SERVER-DATA.cmd` 只同步运行数据，不会上传网页或服务端代码。

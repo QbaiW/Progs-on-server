@@ -10,3 +10,5 @@ OWNER-ACCESS.txt
 .env.*
 !.env.example
 node_modules/
+# npm creates this on the server; dependencies are declared in package.json.
+/package-lock.json

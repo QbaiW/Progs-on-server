@@ -2,11 +2,14 @@
 
 ## 1. 准备项目
 
-建议把整个 `shared-board` 文件夹上传到：
+建议把 Git 仓库（包含 `shared-board` 子目录）上传到：
 
 ```text
 /www/wwwroot/qe-star-bottle
 ```
+
+应用目录应为 `/www/wwwroot/qe-star-bottle/shared-board`。如果使用 Git 部署，
+不要只上传 `shared-board` 子目录，否则服务器上没有自动部署脚本。
 
 可以不上传 `cloudflared.exe`、`*.ps1`、`*.cmd`、`*.log` 和 `public-url.txt`。不要删除 `data` 文件夹；其中保存纸条、收藏、访问记录、主人设备名单、功能数据和主页管理设置。
 
@@ -16,9 +19,11 @@
 
 ```bash
 cd /www/wwwroot/qe-star-bottle
-npm install --omit=dev
+npm install --omit=dev --package-lock=false
 npm install -g pm2
 ```
+
+项目没有提交依赖锁文件；`npm install` 产生的 `package-lock.json` 不参与代码部署。
 
 如果服务器没有编译工具，当前项目不需要编译原生模块；`three` 和 `cannon-es` 的浏览器文件已经放在 `public/vendor` 中。
 
@@ -99,11 +104,15 @@ data/portal-activity.json
 
 后四个文件在对应功能首次产生数据前可能尚不存在；存在时必须一并备份。`settings.json` 或生产 `.env` 中含有站长密码，不要上传到公开仓库。
 
-更新代码后执行：
+更新代码时，在仓库根目录执行自动部署脚本（它会拉取 `main`、按需安装依赖、重启 PM2 并检查健康状态）：
 
 ```bash
 cd /www/wwwroot/qe-star-bottle
-npm install --omit=dev
-pm2 restart qe-star-bottle --update-env
-curl http://127.0.0.1:8787/api/health
+bash shared-board/deploy-server.sh
 ```
+
+脚本会忽略 `npm install` 自动生成的未跟踪 `shared-board/package-lock.json`，但仍会拒绝
+其他未提交的代码改动，以免覆盖服务器上的人工修改。看到 `refusing dirty non-data path`
+时先检查 `git status --short`，不要直接使用 `git reset --hard`。宝塔终端是 Linux shell，
+请逐行粘贴命令；如果出现 `$'\r': command not found`，说明复制内容带入了 Windows 换行符，
+重新手动输入该行即可。
