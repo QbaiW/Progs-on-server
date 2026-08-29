@@ -1,10 +1,65 @@
 # QE给圆圆宝宝的星星瓶
 
-一个全屏 3D 折纸星星瓶网站。普通访问者只能阅读和收藏纸条，主人登录后才能修改纸条内容。
+一个包含多个功能入口的网站。`/home` 是功能中心；普通访问者可以从这里进入星星瓶、七夕星空情书和严格教育现场。星星瓶仍保留原有纸条、收藏和主人编辑能力。
+
+## 网站入口
+
+- `http://localhost:8787/`：重定向到功能中心。
+- `http://localhost:8787/home`：选择要进入的功能。
+- `http://localhost:8787/star-bottle`：星星瓶。
+- `http://localhost:8787/love-stars`：七夕星空情书。
+- `http://localhost:8787/wrong`：严格教育现场。
+
+功能中心通过 `GET /api/features` 读取功能目录。页面入口、导航和服务端路由都来自 `config/features.js`，不会把内部文件路径返回给浏览器。
+
+两个独立功能各自使用命名空间 API 和数据文件：
+
+- 七夕星空情书：`/api/love-stars/message`，数据保存到 `data/love-stars-messages.json`。
+- 严格教育现场：`/api/wrong/hit` 与 `/api/wrong/stats`，数据保存到 `data/wrong-counter.json`。
+
+它们不会调用或覆盖星星瓶原有的 `/api/message`、`/api/hit` 数据。敲打统计接口使用统一的 `OWNER_PASSWORD`（或 `data/settings.json` 中的主人密码），不会复制外部项目的密码或 `state.json`。
+
+## 新增功能
+
+1. 在 `public/<feature-id>/` 下新增独立页面，例如 `public/my-tool/index.html`，以及它需要的脚本、样式和素材。页面资源使用根绝对路径，避免 `/tool` 和 `/tool/` 的尾斜杠造成相对路径差异。
+2. 在 `config/features.js` 增加一项：
+
+   ```js
+   {
+     id: "my-tool",
+     title: "我的工具",
+     description: "一句简短说明。",
+     icon: "◇",
+     path: "/my-tool",
+     entry: "/my-tool/index.html",
+     order: 20,
+     enabled: true,
+   }
+   ```
+
+3. 运行 `npm test`，确认注册表校验、页面路由和原有星星瓶功能都通过。
+
+`id`、`path` 和 `entry` 必须唯一；`path` 不能使用 `/api`、`/home`、`/portal`、`/vendor`、`/music`、`/pet` 等保留前缀；`enabled: false` 会同时隐藏入口并阻断页面及其目录资源直达。服务端还会校验注册入口的真实路径仍位于 `public/` 内。
+
+## 目录结构
+
+```text
+config/features.js       功能注册表（新增功能从这里接入）
+lib/feature-registry.js   注册表校验与公开数据投影
+public/portal/            功能中心页面、样式和脚本
+public/index.html         星星瓶页面（保留根级资源兼容路径）
+public/love-stars/        七夕星空情书页面及资源
+public/wrong/             严格教育现场页面、Matter.js 和图片资源
+data/love-stars-messages.json  七夕留言运行数据（不提交）
+data/wrong-counter.json        敲打统计运行数据（不提交）
+test-portal.js             门户与注册表测试
+test-love-stars.js         七夕功能/API 测试
+test-wrong.js              严格教育现场/API 测试
+```
 
 ## 本地运行
 
-先在项目上一级目录双击 `PULL-SERVER-DATA.cmd`，把服务器数据下载到 `server-data\from-server`。然后双击本目录的 `START-LOCAL.cmd`，浏览器访问 `http://localhost:8787/`。
+先在项目上一级目录双击 `PULL-SERVER-DATA.cmd`，把服务器数据下载到 `server-data\from-server`。然后双击本目录的 `START-LOCAL.cmd`，浏览器访问 `http://localhost:8787/home`。
 
 本地服务只读写下载的数据副本，不会直接修改云服务器。需要把本地数据传回服务器时，再运行 `PUSH-SERVER-DATA.cmd`。前端代码和音乐文件不需要编译，修改后刷新浏览器即可；修改 `server.js` 后需要关闭并重新运行本地服务。
 
@@ -36,7 +91,7 @@ Public URL: https://...trycloudflare.com
 
 收藏保存在服务器的 `data/favorites.json`。任意设备收藏或取消后，所有在线设备会自动更新；旧浏览器中已有的本地收藏会在首次打开新版网站时迁移一次。
 
-迁移到其他服务器时，请一起保留整个 `data` 文件夹，其中包含纸条、收藏、打开记录、主人设备名单和设置。
+迁移到其他服务器时，请一起保留整个 `data` 文件夹，其中包含纸条、收藏、打开记录、主人设备名单、设置，以及两个独立功能的留言和敲打统计。
 
 ## 运行条件
 

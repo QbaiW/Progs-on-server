@@ -2,6 +2,12 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const {
+  FEATURE_REGISTRY,
+  createFeatureRegistry,
+  featureForPath,
+  listPublicFeatures,
+} = require("./lib/feature-registry");
 
 const ROOT = __dirname;
 const DEFAULT_PUBLIC_DIR = path.join(ROOT, "public");
@@ -10,6 +16,7 @@ const DEFAULT_DATA_DIR = process.env.BOARD_DATA_DIR || path.join(ROOT, "data");
 // explicitly when a direct LAN/public bind is intentionally needed.
 const DEFAULT_HOST = process.env.HOST || "127.0.0.1";
 const DEFAULT_PORT = Number(process.env.PORT || 8787);
+const PORTAL_ENTRY = "/portal/home.html";
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_NOTE_LENGTH = 2000;
 const MAX_NOTE_COUNT = 500;
@@ -18,6 +25,14 @@ const MAX_ACTIVITY_ENTRIES = 5000;
 const MAX_OWNER_DEVICES = 100;
 const MAX_FAVORITES = 500;
 const MAX_CUSTOM_EMOTION_LABEL_LENGTH = 24;
+const LOVE_STARS_MESSAGE_MAX_LENGTH = 200;
+const LOVE_STARS_MESSAGE_MAX_COUNT = 500;
+const LOVE_STARS_MESSAGE_WINDOW_MS = 10 * 1000;
+const LOVE_STARS_BLOCKED_WORDS = Object.freeze(["傻逼", "妈的", "操你", "fuck", "shit", "nmsl"]);
+const WRONG_COUNTER_HISTORY_LIMIT = 500;
+const WRONG_HIT_WINDOW_MS = 60 * 1000;
+const WRONG_HIT_LIMIT = 240;
+const WRONG_VISITOR_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{3,127}$/;
 const SESSION_COOKIE = "star_bottle_owner";
 const DEFAULT_SESSION_HOURS = 12;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -41,6 +56,7 @@ const CONTENT_TYPES = new Map([
   [".js", "text/javascript; charset=utf-8"],
   [".mjs", "text/javascript; charset=utf-8"],
   [".json", "application/json; charset=utf-8"],
+  [".txt", "text/plain; charset=utf-8"],
   [".svg", "image/svg+xml"],
   [".png", "image/png"],
   [".jpg", "image/jpeg"],
@@ -515,6 +531,143 @@ function readNotes(notesFile) {
   return normalizeNotesDocument(JSON.parse(fs.readFileSync(notesFile, "utf8")));
 }
 
+function emptyLoveStarsMessagesDocument() {
+  return { version: 1, updatedAt: new Date().toISOString(), messages: [] };
+}
+
+function normalizeLoveStarsMessagesDocument(raw) {
+  if (!raw || !Array.isArray(raw.messages)) return emptyLoveStarsMessagesDocument();
+  const seen = new Set();
+  const messages = raw.messages.slice(-LOVE_STARS_MESSAGE_MAX_COUNT).flatMap((message) => {
+    if (!message || typeof message !== "object") return [];
+    const numericId = typeof message.id === "number"
+      ? message.id
+      : typeof message.id === "string" && /^\d{1,16}$/.test(message.id)
+        ? Number(message.id)
+        : 0;
+    const content = typeof message.content === "string" ? message.content.trim() : "";
+    if (!Number.isSafeInteger(numericId) || numericId < 1 || !content ||
+      content.length > LOVE_STARS_MESSAGE_MAX_LENGTH || seen.has(numericId)) return [];
+    seen.add(numericId);
+    return [{
+      id: numericId,
+      content,
+      created_at: typeof message.created_at === "string" ? message.created_at : "",
+    }];
+  });
+  return {
+    version: Number.isSafeInteger(raw.version) && raw.version > 0 ? raw.version : 1,
+    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : new Date().toISOString(),
+    messages,
+  };
+}
+
+function readLoveStarsMessages(messagesFile) {
+  try {
+    return normalizeLoveStarsMessagesDocument(JSON.parse(fs.readFileSync(messagesFile, "utf8")));
+  } catch (error) {
+    if (error.code === "ENOENT") return emptyLoveStarsMessagesDocument();
+    throw error;
+  }
+}
+
+function normalizeNonNegativeInteger(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return 0;
+  return Math.min(Number.MAX_SAFE_INTEGER, Math.floor(number));
+}
+
+function emptyWrongCounterDocument() {
+  return {
+    version: 1,
+    totalHits: 0,
+    visitors: Object.create(null),
+    updatedAt: new Date().toISOString(),
+    hitHistory: [],
+  };
+}
+
+function normalizeWrongCounterDocument(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return emptyWrongCounterDocument();
+  }
+
+  const visitors = Object.create(null);
+  const visitorSource = raw.visitors && typeof raw.visitors === "object" && !Array.isArray(raw.visitors)
+    ? raw.visitors
+    : raw.visitorCounts && typeof raw.visitorCounts === "object" && !Array.isArray(raw.visitorCounts)
+      ? raw.visitorCounts
+      : {};
+  let visitorTotal = 0;
+  for (const [id, rawCount] of Object.entries(visitorSource)) {
+    if (!WRONG_VISITOR_ID_PATTERN.test(id)) continue;
+    const count = normalizeNonNegativeInteger(rawCount);
+    if (!count) continue;
+    visitors[id] = count;
+    visitorTotal = Math.min(Number.MAX_SAFE_INTEGER, visitorTotal + count);
+  }
+
+  const historySource = Array.isArray(raw.hitHistory)
+    ? raw.hitHistory
+    : Array.isArray(raw.recentHits)
+      ? raw.recentHits
+      : [];
+  const hitHistory = historySource.flatMap((record) => {
+    if (!record || typeof record !== "object") return [];
+    const rawTimestamp = record.at ?? record.timestamp ?? record.time ?? record.createdAt;
+    const timestamp = Date.parse(rawTimestamp);
+    if (!Number.isFinite(timestamp)) return [];
+    const rawVisitorId = record.visitorId ?? record.visitor ?? record.id;
+    const visitorId = typeof rawVisitorId === "string" && WRONG_VISITOR_ID_PATTERN.test(rawVisitorId)
+      ? rawVisitorId
+      : null;
+    return [{ visitorId, at: new Date(timestamp).toISOString() }];
+  }).sort((left, right) => right.at.localeCompare(left.at)).slice(0, WRONG_COUNTER_HISTORY_LIMIT);
+
+  const submittedTotal = normalizeNonNegativeInteger(raw.totalHits ?? raw.total);
+  const totalHits = Math.max(submittedTotal, visitorTotal, hitHistory.length);
+  const normalizedUpdatedAt = normalizeTimestamp(raw.updatedAt);
+  return {
+    version: Number.isSafeInteger(raw.version) && raw.version > 0 ? raw.version : 1,
+    totalHits,
+    visitors,
+    updatedAt: normalizedUpdatedAt || hitHistory[0]?.at || new Date().toISOString(),
+    hitHistory,
+  };
+}
+
+function readWrongCounter(counterFile) {
+  try {
+    return normalizeWrongCounterDocument(JSON.parse(fs.readFileSync(counterFile, "utf8")));
+  } catch (error) {
+    if (error.code === "ENOENT") return emptyWrongCounterDocument();
+    throw error;
+  }
+}
+
+function wrongCounterSnapshot(document) {
+  const visitors = Object.entries(document.visitors)
+    .map(([id, hits]) => ({ id, hits, count: hits }))
+    .sort((left, right) => right.hits - left.hits || left.id.localeCompare(right.id));
+  const recentHits = document.hitHistory.map((record) => ({
+    visitorId: record.visitorId,
+    at: record.at,
+    timestamp: record.at,
+  }));
+  return {
+    ok: true,
+    totalHits: document.totalHits,
+    total: document.totalHits,
+    visitorCount: visitors.length,
+    visitors,
+    updatedAt: document.updatedAt,
+    hitHistory: recentHits,
+    recentHits,
+    historyLimit: WRONG_COUNTER_HISTORY_LIMIT,
+    historyTruncated: document.totalHits > recentHits.length,
+  };
+}
+
 function emptyActivityDocument() {
   return { version: 1, updatedAt: new Date().toISOString(), entries: [] };
 }
@@ -646,12 +799,24 @@ function readSettings(settingsFile, passwordOverride) {
 function createStarBottleServer(options = {}) {
   const publicDir = options.publicDir || DEFAULT_PUBLIC_DIR;
   const realPublicDir = fs.realpathSync(publicDir);
+  const featureRegistry = createFeatureRegistry(options.featureRegistry || FEATURE_REGISTRY);
+  const disabledFeatureEntries = new Set(
+    featureRegistry.filter((feature) => !feature.enabled).map((feature) => feature.entry),
+  );
+  const disabledFeaturePaths = featureRegistry
+    .filter((feature) => !feature.enabled)
+    .map((feature) => feature.path);
+  const enabledFeatureIds = new Set(
+    featureRegistry.filter((feature) => feature.enabled).map((feature) => feature.id),
+  );
   const dataDir = options.dataDir || DEFAULT_DATA_DIR;
   const notesFile = path.join(dataDir, "notes.json");
   const settingsFile = path.join(dataDir, "settings.json");
   const activityFile = path.join(dataDir, "activity.json");
   const devicesFile = path.join(dataDir, "owner-devices.json");
   const favoritesFile = path.join(dataDir, "favorites.json");
+  const loveStarsMessagesFile = path.join(dataDir, "love-stars-messages.json");
+  const wrongCounterFile = path.join(dataDir, "wrong-counter.json");
   const settings = readSettings(settingsFile, options.ownerPassword);
   let notesDocument = readNotes(notesFile);
   let notesSignature = JSON.stringify(notesDocument);
@@ -659,6 +824,8 @@ function createStarBottleServer(options = {}) {
   let ownerDevicesDocument = readOwnerDevices(devicesFile);
   let favoritesDocument = readFavorites(favoritesFile);
   let favoritesSignature = JSON.stringify(favoritesDocument);
+  let loveStarsMessagesDocument = readLoveStarsMessages(loveStarsMessagesFile);
+  let wrongCounterDocument = readWrongCounter(wrongCounterFile);
   let watcher = null;
   let reloadTimer = null;
   let favoritesReloadTimer = null;
@@ -667,6 +834,8 @@ function createStarBottleServer(options = {}) {
   const loginAttempts = new Map();
   const activityAttempts = new Map();
   const favoriteAttempts = new Map();
+  const loveStarsMessageAttempts = new Map();
+  const wrongHitAttempts = new Map();
   const eventClients = new Map();
   let favoritesWriteQueue = Promise.resolve();
 
@@ -715,6 +884,28 @@ function createStarBottleServer(options = {}) {
     const persisted = writeJsonFileSafely(favoritesFile, nextDocument, normalizeFavoritesDocument, "收藏");
     favoritesDocument = persisted;
     favoritesSignature = JSON.stringify(persisted);
+    return persisted;
+  }
+
+  function saveLoveStarsMessages(nextDocument) {
+    const persisted = writeJsonFileSafely(
+      loveStarsMessagesFile,
+      nextDocument,
+      normalizeLoveStarsMessagesDocument,
+      "七夕留言",
+    );
+    loveStarsMessagesDocument = persisted;
+    return persisted;
+  }
+
+  function saveWrongCounter(nextDocument) {
+    const persisted = writeJsonFileSafely(
+      wrongCounterFile,
+      nextDocument,
+      normalizeWrongCounterDocument,
+      "敲打计数",
+    );
+    wrongCounterDocument = persisted;
     return persisted;
   }
 
@@ -819,7 +1010,307 @@ function createStarBottleServer(options = {}) {
     return recent.length > 120;
   }
 
+  function loveStarsMessageRateLimited(request) {
+    const address = clientAddress(request);
+    const now = Date.now();
+    const recent = (loveStarsMessageAttempts.get(address) || [])
+      .filter((time) => now - time < LOVE_STARS_MESSAGE_WINDOW_MS);
+    recent.push(now);
+    loveStarsMessageAttempts.set(address, recent);
+    return recent.length > 1;
+  }
+
+  function wrongHitRateLimited(request) {
+    const address = clientAddress(request);
+    const now = Date.now();
+    const recent = (wrongHitAttempts.get(address) || [])
+      .filter((time) => now - time < WRONG_HIT_WINDOW_MS);
+    recent.push(now);
+    wrongHitAttempts.set(address, recent);
+    return recent.length > WRONG_HIT_LIMIT;
+  }
+
+  function safeRegisteredEntry(entry) {
+    if (typeof entry !== "string" || !entry.startsWith("/")) return null;
+    const candidate = path.resolve(realPublicDir, `.${entry}`);
+    const relative = path.relative(realPublicDir, candidate);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) return null;
+    return candidate;
+  }
+
+  async function resolveRegisteredEntry(entry) {
+    const candidate = safeRegisteredEntry(entry);
+    if (!candidate) return null;
+    try {
+      const realCandidate = await fs.promises.realpath(candidate);
+      const relative = path.relative(realPublicDir, realCandidate);
+      if (relative.startsWith("..") || path.isAbsolute(relative)) return null;
+      return realCandidate;
+    } catch (error) {
+      if (error.code === "ENOENT" || error.code === "ENOTDIR") return null;
+      throw error;
+    }
+  }
+
+  async function serveRegisteredPage(request, response, pathname) {
+    if (request.method !== "GET" && request.method !== "HEAD") return false;
+
+    if (pathname === "/") {
+      const portalPath = await resolveRegisteredEntry(PORTAL_ENTRY);
+      if (!portalPath) return false;
+      const stats = await fs.promises.stat(portalPath);
+      if (!stats.isFile()) return false;
+      response.writeHead(302, {
+        Location: "/home",
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+      });
+      response.end();
+      return true;
+    }
+
+    const normalizedPath = pathname.length > 1 && pathname.endsWith("/")
+      ? pathname.slice(0, -1)
+      : pathname;
+    const entry = normalizedPath === "/home"
+      ? PORTAL_ENTRY
+      : featureForPath(normalizedPath, featureRegistry)?.entry;
+    if (!entry) return false;
+
+    const entryPath = await resolveRegisteredEntry(entry);
+    if (!entryPath) return false;
+    return serveFile(request, response, entryPath);
+  }
+
   async function handleApi(request, response, pathname) {
+    const featureCatalogPath = pathname === "/api/features" || pathname === "/api/features/";
+    if (featureCatalogPath && (request.method === "GET" || request.method === "HEAD")) {
+      writeJson(response, 200, {
+        version: 1,
+        features: listPublicFeatures(featureRegistry),
+      }, { Allow: "GET, HEAD, OPTIONS" });
+      return true;
+    }
+    if (featureCatalogPath && request.method === "OPTIONS") {
+      writeJson(response, 200, { ok: true }, {
+        Allow: "GET, HEAD, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+        "Access-Control-Allow-Headers": "Accept, Content-Type",
+      });
+      return true;
+    }
+    if (featureCatalogPath) {
+      writeJson(response, 405, { error: "GET is required" }, { Allow: "GET, HEAD, OPTIONS" });
+      return true;
+    }
+
+    const loveStarsMessagePath = enabledFeatureIds.has("love-stars") &&
+      (pathname === "/api/love-stars/message" ||
+      pathname === "/api/love-stars/message/");
+    if (loveStarsMessagePath && request.method === "OPTIONS") {
+      writeJson(response, 200, { ok: true }, {
+        Allow: "GET, POST, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+      });
+      return true;
+    }
+    if (loveStarsMessagePath && (request.method === "GET" || request.method === "HEAD")) {
+      writeJson(response, 200, {
+        messages: loveStarsMessagesDocument.messages.slice().reverse(),
+      }, { Allow: "GET, POST, OPTIONS" });
+      return true;
+    }
+
+    if (loveStarsMessagePath && request.method === "POST") {
+      try {
+        const body = await readJsonBody(request);
+        const content = typeof body.content === "string" ? body.content.trim() : "";
+        if (!content) {
+          writeJson(response, 400, { success: false, error: "留言内容不能为空" });
+          return true;
+        }
+        if (content.length > LOVE_STARS_MESSAGE_MAX_LENGTH) {
+          writeJson(response, 400, {
+            success: false,
+            error: `留言不能超过 ${LOVE_STARS_MESSAGE_MAX_LENGTH} 字`,
+          });
+          return true;
+        }
+        const lowerContent = content.toLowerCase();
+        if (LOVE_STARS_BLOCKED_WORDS.some((word) => lowerContent.includes(word.toLowerCase()))) {
+          writeJson(response, 400, { success: false, error: "留言包含不合适的内容，换一句吧" });
+          return true;
+        }
+        if (loveStarsMessageRateLimited(request)) {
+          writeJson(response, 429, { success: false, error: "发送太快啦，歇几秒再试" });
+          return true;
+        }
+
+        const previousIds = new Set(loveStarsMessagesDocument.messages.map((message) => message.id));
+        let id = Date.now();
+        while (previousIds.has(id)) id += 1;
+        const now = new Date();
+        const message = {
+          id,
+          content,
+          created_at: now.toISOString().replace("T", " ").slice(0, 19),
+        };
+        const persisted = saveLoveStarsMessages({
+          version: loveStarsMessagesDocument.version + 1,
+          updatedAt: now.toISOString(),
+          messages: [...loveStarsMessagesDocument.messages, message].slice(-LOVE_STARS_MESSAGE_MAX_COUNT),
+        });
+        writeJson(response, 200, { success: true, id: message.id, version: persisted.version });
+      } catch (error) {
+        writeJson(response, error.statusCode || 400, {
+          success: false,
+          error: error.message || "留言保存失败",
+          code: error.storageCode,
+        });
+      }
+      return true;
+    }
+    if (loveStarsMessagePath) {
+      writeJson(response, 405, { success: false, error: "GET or POST is required" }, {
+        Allow: "GET, POST, OPTIONS",
+      });
+      return true;
+    }
+
+    const wrongHitPath = enabledFeatureIds.has("wrong") &&
+      (pathname === "/api/wrong/hit" || pathname === "/api/wrong/hit/");
+    if (wrongHitPath) {
+      if (request.method === "OPTIONS") {
+        writeJson(response, 200, { ok: true }, {
+          Allow: "POST, OPTIONS",
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, X-Visitor-Id",
+        });
+        return true;
+      }
+      if (request.method !== "POST") {
+        writeJson(response, 405, { ok: false, error: "POST is required." }, { Allow: "POST, OPTIONS" });
+        return true;
+      }
+      if (wrongHitRateLimited(request)) {
+        writeJson(response, 429, { ok: false, error: "敲打太频繁，请稍后再试" });
+        return true;
+      }
+
+      try {
+        const body = await readJsonBody(request);
+        let suppliedVisitorId;
+        if (body && typeof body === "object" && !Array.isArray(body)) {
+          for (const field of ["visitorId", "visitor", "id"]) {
+            if (Object.prototype.hasOwnProperty.call(body, field)) {
+              suppliedVisitorId = body[field];
+              break;
+            }
+          }
+        }
+        if (suppliedVisitorId === undefined || suppliedVisitorId === null || suppliedVisitorId === "") {
+          suppliedVisitorId = request.headers["x-visitor-id"];
+        }
+        if (suppliedVisitorId === undefined || suppliedVisitorId === null || suppliedVisitorId === "") {
+          suppliedVisitorId = parseCookies(request.headers.cookie).get("qe_visitor");
+        }
+
+        let visitorId = suppliedVisitorId === undefined || suppliedVisitorId === null || suppliedVisitorId === ""
+          ? crypto.randomUUID().replaceAll("-", "")
+          : String(suppliedVisitorId).trim();
+        if (!WRONG_VISITOR_ID_PATTERN.test(visitorId)) {
+          writeJson(response, 400, {
+            ok: false,
+            error: "visitorId must be 4-128 ASCII letters, numbers, hyphens, or underscores.",
+          });
+          return true;
+        }
+
+        const currentVisitorHits = normalizeNonNegativeInteger(wrongCounterDocument.visitors[visitorId]);
+        const currentTotalHits = normalizeNonNegativeInteger(wrongCounterDocument.totalHits);
+        const visitorHits = currentVisitorHits >= Number.MAX_SAFE_INTEGER
+          ? Number.MAX_SAFE_INTEGER
+          : currentVisitorHits + 1;
+        const totalHits = currentTotalHits >= Number.MAX_SAFE_INTEGER
+          ? Number.MAX_SAFE_INTEGER
+          : currentTotalHits + 1;
+        const at = new Date().toISOString();
+        const nextDocument = {
+          version: Number.isSafeInteger(wrongCounterDocument.version) && wrongCounterDocument.version > 0
+            ? wrongCounterDocument.version + 1
+            : 2,
+          totalHits,
+          visitors: { ...wrongCounterDocument.visitors, [visitorId]: visitorHits },
+          updatedAt: at,
+          hitHistory: [{ visitorId, at }, ...wrongCounterDocument.hitHistory]
+            .slice(0, WRONG_COUNTER_HISTORY_LIMIT),
+        };
+        const persisted = saveWrongCounter(nextDocument);
+        writeJson(response, 200, {
+          ok: true,
+          visitorId,
+          visitorHits: persisted.visitors[visitorId],
+          totalHits: persisted.totalHits,
+          total: persisted.totalHits,
+          at,
+        }, {
+          Allow: "POST, OPTIONS",
+          // Keep the anonymous visitor stable across visits without exposing it
+          // to page scripts. The path is site-wide so API requests receive it.
+          "Set-Cookie": `qe_visitor=${visitorId}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax${requestIsSecure(request) ? "; Secure" : ""}`,
+        });
+      } catch (error) {
+        writeJson(response, error.statusCode || 400, {
+          ok: false,
+          error: error.message || "敲打计数保存失败",
+          code: error.storageCode,
+        });
+      }
+      return true;
+    }
+
+    const wrongStatsPath = enabledFeatureIds.has("wrong") &&
+      (pathname === "/api/wrong/stats" || pathname === "/api/wrong/stats/");
+    if (wrongStatsPath) {
+      if (request.method === "OPTIONS") {
+        writeJson(response, 200, { ok: true }, {
+          Allow: "GET, HEAD, OPTIONS",
+          "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+          "Access-Control-Allow-Headers": "X-Admin-Password, Authorization",
+        });
+        return true;
+      }
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        writeJson(response, 405, { ok: false, error: "GET is required." }, { Allow: "GET, HEAD, OPTIONS" });
+        return true;
+      }
+
+      const headerPassword = String(request.headers["x-admin-password"] || "");
+      const authorization = String(request.headers.authorization || "");
+      const bearerMatch = authorization.match(/^Bearer\s+(.+)$/i);
+      let queryPassword = "";
+      try {
+        queryPassword = new URL(request.url || "", "http://localhost").searchParams.get("password") || "";
+      } catch {
+        queryPassword = "";
+      }
+      const candidatePassword = headerPassword || bearerMatch?.[1] || queryPassword;
+      if (!candidatePassword || !safeEqual(candidatePassword, settings.ownerPassword)) {
+        writeJson(response, 401, { ok: false, error: "Admin password required." }, {
+          Allow: "GET, HEAD, OPTIONS",
+          "WWW-Authenticate": "X-Admin-Password",
+        });
+        return true;
+      }
+
+      writeJson(response, 200, wrongCounterSnapshot(wrongCounterDocument), {
+        Allow: "GET, HEAD, OPTIONS",
+      });
+      return true;
+    }
+
     if (pathname === "/api/health" && request.method === "GET") {
       writeJson(response, 200, {
         ok: true,
@@ -1445,8 +1936,16 @@ function createStarBottleServer(options = {}) {
       return false;
     }
     if (decodedPath.includes("\\") || decodedPath.includes("\0")) return false;
+    // Reject encoded dot segments before path.resolve can collapse them into a
+    // registered entry and bypass the disabled-feature guard.
+    const pathSegments = decodedPath.split("/");
+    if (pathSegments.some((segment) => segment === "." || segment === "..")) return false;
+    const normalizedDecodedPath = decodedPath.replace(/\/{2,}/g, "/");
+    if (disabledFeatureEntries.has(normalizedDecodedPath) || disabledFeaturePaths.some((featurePath) =>
+      normalizedDecodedPath === featurePath || normalizedDecodedPath.startsWith(`${featurePath}/`),
+    )) return false;
 
-    const candidate = path.resolve(realPublicDir, `.${decodedPath}`);
+    const candidate = path.resolve(realPublicDir, `.${normalizedDecodedPath}`);
     const relative = path.relative(realPublicDir, candidate);
     if (relative.startsWith("..") || path.isAbsolute(relative)) return false;
     try {
@@ -1470,6 +1969,9 @@ function createStarBottleServer(options = {}) {
         if (!handled) writeJson(response, 404, { error: "API endpoint not found" });
         return;
       }
+
+      const registeredPage = await serveRegisteredPage(request, response, pathname);
+      if (registeredPage) return;
 
       const handled = await handleStatic(request, response, pathname);
       if (!handled) {
@@ -1507,6 +2009,16 @@ function createStarBottleServer(options = {}) {
       const recent = attempts.filter((time) => now - time < 60_000);
       if (recent.length) favoriteAttempts.set(address, recent);
       else favoriteAttempts.delete(address);
+    }
+    for (const [address, attempts] of loveStarsMessageAttempts) {
+      const recent = attempts.filter((time) => now - time < LOVE_STARS_MESSAGE_WINDOW_MS);
+      if (recent.length) loveStarsMessageAttempts.set(address, recent);
+      else loveStarsMessageAttempts.delete(address);
+    }
+    for (const [address, attempts] of wrongHitAttempts) {
+      const recent = attempts.filter((time) => now - time < WRONG_HIT_WINDOW_MS);
+      if (recent.length) wrongHitAttempts.set(address, recent);
+      else wrongHitAttempts.delete(address);
     }
   }, 20000);
   heartbeat.unref();

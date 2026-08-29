@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="description" content="七夕星空情书：旋转视角，在星尘中发现隐藏的告白。" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:; base-uri 'self'; form-action 'self'; object-src 'none'" />
+  <title>七夕星空情书</title>
+  <link rel="stylesheet" href="/love-stars/style.css" />
+</head>
+<body>
+  <a class="home-link" href="/home">功能中心</a>
+
+  <!-- 3D 星空容器 -->
+  <div id="scene-container" aria-label="可拖拽旋转的 3D 星空"></div>
+
+  <!-- 加载遮罩 -->
+  <div id="loading">
+    <div class="loader-ring"></div>
+    <p>正在为你点亮整片星空…</p>
+  </div>
+
+  <!-- 兼容旧脚本的隐藏节点；图像悬停不显示文字。 -->
+  <div id="constellation-label" hidden></div>
+
+  <!-- 右下角留言气泡（保留隐式编辑入口） -->
+  <div id="love-note" class="love-note" aria-label="留言">
+    <span class="love-note-heart">❤</span>
+    <span id="love-note-text" class="love-note-text">宝宝，我们就像两个相互环绕的星星呀，相互照亮对方，温暖对方，永远都不会分开。
+我的宝贝，七夕节快乐，外脑，永远永远</span>
+  </div>
+
+  <!-- 留言编辑态 -->
+  <div id="love-note-edit" class="love-note-edit" hidden>
+    <input id="love-note-input" type="text" maxlength="200" aria-label="留言内容" />
+    <button id="love-note-save" class="btn-primary btn-submit">保存</button>
+    <span id="love-note-status" class="love-note-status" role="status" aria-live="polite" hidden></span>
+  </div>
+
+  <!-- Three.js r128（UMD，cdnjs；SRI 防供应链篡改） -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
+          integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu"
+          crossorigin="anonymous"></script>
+  <!-- OrbitControls（r128 配套的非模块版本，jsdelivr；SRI 防供应链篡改） -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"
+          integrity="sha384-wagZhIFgY4hD+7awjQjR4e2E294y6J2HSnd8eTNc15ZubTeQeVRZwhQJ+W6hnBsf"
+          crossorigin="anonymous"></script>
+  <!-- 主逻辑 -->
+  <script src="/love-stars/main.js"></script>
+</body>
+</html>

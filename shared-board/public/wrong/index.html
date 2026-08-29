@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#f6d95c" />
+    <title>圆圆宝宝的严格教育现场</title>
+    <link rel="stylesheet" href="/wrong/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <div class="brand" aria-label="圆圆和 QE">
+          <span class="brand-mark" aria-hidden="true">YY</span>
+          <span class="brand-name">圆圆 × QE</span>
+        </div>
+
+        <p class="counter" aria-live="polite" aria-atomic="true">
+          <span>圆圆宝宝已经严厉敲打 QE</span>
+          <strong id="hit-count">0</strong>
+          <span>次</span>
+        </p>
+
+        <div class="controls" aria-label="页面控制">
+          <a
+            class="home-link"
+            href="/home"
+            aria-label="返回功能中心"
+            data-tooltip="功能中心"
+          >
+            <span aria-hidden="true">⌂</span>
+            <span class="home-link-label">功能中心</span>
+          </a>
+          <button
+            class="icon-button admin-trigger"
+            id="admin-trigger"
+            type="button"
+            aria-label="YY"
+            data-tooltip="YY"
+          >
+            <span aria-hidden="true">YY</span>
+          </button>
+          <button
+            class="icon-button"
+            id="sound-toggle"
+            type="button"
+            aria-label="关闭音效"
+            aria-pressed="true"
+            data-tooltip="关闭音效"
+          >
+            <span aria-hidden="true">♫</span>
+          </button>
+          <button
+            class="icon-button"
+            id="reset-button"
+            type="button"
+            aria-label="清零计数"
+            data-tooltip="清零计数"
+          >
+            <span aria-hidden="true">↺</span>
+          </button>
+        </div>
+      </header>
+
+      <section
+        class="stage"
+        id="stage"
+        tabindex="0"
+        aria-label="圆圆宝宝敲打 QE 的互动场景"
+      >
+        <div class="stage-grid" aria-hidden="true"></div>
+        <div class="doodle doodle-one" aria-hidden="true">✦</div>
+        <div class="doodle doodle-two" aria-hidden="true">＋</div>
+        <div class="doodle doodle-three" aria-hidden="true">✦</div>
+
+        <div class="bubble-layer" id="bubble-layer" aria-live="off"></div>
+        <div class="burst-layer" id="burst-layer" aria-hidden="true"></div>
+
+        <div class="scene" id="scene" aria-hidden="true">
+          <div class="character bear">
+            <span class="character-tag bear-tag">圆圆宝宝</span>
+            <img src="/wrong/assets/white-bear.png" alt="" draggable="false" />
+          </div>
+
+          <div class="hammer" id="hammer">
+            <img src="/wrong/assets/red-hammer.png" alt="" draggable="false" />
+          </div>
+
+          <div class="impact-mark" aria-hidden="true">
+            <i></i><i></i><i></i>
+          </div>
+
+          <div class="character dog">
+            <span class="character-tag dog-tag">QE</span>
+            <img src="/wrong/assets/yellow-dog.png" alt="" draggable="false" />
+          </div>
+        </div>
+
+        <div class="floor" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+
+        <p class="sr-only" id="phrase-status" aria-live="polite"></p>
+      </section>
+    </main>
+
+    <div class="admin-modal" id="admin-modal" hidden>
+      <div class="admin-backdrop" data-admin-close></div>
+      <section
+        class="admin-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label="共享敲打记录"
+      >
+        <button
+          class="admin-close"
+          id="admin-close"
+          type="button"
+          aria-label="关闭"
+          data-tooltip="关闭"
+        >
+          <span aria-hidden="true">×</span>
+        </button>
+
+        <div class="admin-lock" id="admin-lock">
+          <p class="admin-kicker">YY / PRIVATE</p>
+          <h2 id="admin-title">共享敲打记录</h2>
+          <p id="admin-description" class="admin-description">输入密码后查看匿名访客统计。</p>
+          <form id="admin-form" class="admin-form">
+            <label for="admin-password">密码</label>
+            <div class="admin-form-row">
+              <input
+                id="admin-password"
+                name="password"
+                type="password"
+                inputmode="text"
+                autocomplete="current-password"
+                maxlength="256"
+                required
+              />
+              <button class="admin-submit" type="submit">查看</button>
+            </div>
+          </form>
+          <p class="admin-error" id="admin-error" role="alert" aria-live="polite"></p>
+        </div>
+
+        <div class="admin-stats" id="admin-stats" hidden>
+          <div class="admin-stats-head">
+            <div>
+              <p class="admin-kicker">LIVE / SHARED</p>
+              <h2>敲打统计</h2>
+            </div>
+            <button
+              class="admin-refresh"
+              id="admin-refresh"
+              type="button"
+              aria-label="刷新统计"
+              data-tooltip="刷新统计"
+            >
+              <span aria-hidden="true">↻</span>
+            </button>
+          </div>
+
+          <div class="admin-stat-grid" aria-live="polite" aria-atomic="true">
+            <div class="admin-stat admin-stat-total">
+              <span>全站累计</span>
+              <strong id="shared-total">0</strong>
+              <small>次</small>
+            </div>
+            <div class="admin-stat admin-stat-other">
+              <span>其他访客</span>
+              <strong id="shared-other">0</strong>
+              <small>次</small>
+            </div>
+            <div class="admin-stat admin-stat-visitors">
+              <span>访客数</span>
+              <strong id="shared-visitors">0</strong>
+              <small>人</small>
+            </div>
+          </div>
+
+          <div class="visitor-heading">
+            <span>匿名访客</span>
+            <span>敲打次数</span>
+          </div>
+          <ul class="visitor-list" id="visitor-list"></ul>
+
+          <section class="hit-history" aria-labelledby="hit-history-title">
+            <div class="history-heading">
+              <div>
+                <p class="admin-kicker">RECENT / TIMELINE</p>
+                <h3 id="hit-history-title">最近敲打时间</h3>
+              </div>
+              <span class="history-note" id="hit-history-note">本地时间 · 最新在前</span>
+            </div>
+            <ol class="hit-history-list" id="hit-history-list"></ol>
+          </section>
+
+          <p class="admin-status" id="admin-status" role="status" aria-live="polite"></p>
+        </div>
+      </section>
+    </div>
+
+    <script src="/wrong/vendor/matter.min.js"></script>
+    <script src="/wrong/script.js"></script>
+  </body>
+</html>

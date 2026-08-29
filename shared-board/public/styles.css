@@ -78,6 +78,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   filter: drop-shadow(0 0 9px rgba(255, 183, 115, .65));
 }
 .top-actions { gap: 13px; pointer-events: auto; }
+.portal-link {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(5, 7, 19, .42);
+  color: var(--muted);
+  font-size: 11px;
+  text-decoration: none;
+  backdrop-filter: blur(10px);
+}
+.portal-link:hover { border-color: rgba(255, 183, 115, .5); color: var(--ink); }
 .sync-state { gap: 7px; color: var(--muted); font-size: 12px; }
 .sync-dot {
   width: 6px;
@@ -505,6 +519,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .sync-state span:last-child { display: none; }
   .round-button { width: 38px; height: 38px; }
   .top-actions { gap: 9px; }
+  .portal-link { padding-inline: 8px; font-size: 10px; }
   .emotion-bubble { min-height: 30px; padding: 4px 8px 4px 5px; }
   .emotion-bubble > span:last-child { display: none; }
   .emoji { width: 22px; height: 22px; }
