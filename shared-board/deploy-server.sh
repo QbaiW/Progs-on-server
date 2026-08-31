@@ -76,7 +76,9 @@ if [[ "$needs_install" == true || ! -d node_modules ]]; then
   npm install --omit=dev --no-audit --no-fund --package-lock=false
 fi
 
-pm2 restart "$APP_NAME" --update-env
+# Re-evaluate the ecosystem file so changes in the app-local .env (including
+# site access credentials) are applied instead of reusing PM2's stored env.
+pm2 startOrRestart "$APP_DIR/ecosystem.config.cjs" --only "$APP_NAME" --update-env
 health=""
 for attempt in {1..15}; do
   if health="$(curl --fail --silent --show-error --max-time 5 http://127.0.0.1:8787/api/health 2>/dev/null)"; then

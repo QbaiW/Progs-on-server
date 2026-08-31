@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#141b24">
+    <meta name="description" content="登录后进入网站功能中心。">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'self'; object-src 'none'">
+    <title>登录 | QE 给圆圆宝宝</title>
+    <link rel="stylesheet" href="/login.css">
+    <script type="module" src="/login.js"></script>
+  </head>
+  <body>
+    <main class="login-shell">
+      <section class="login-panel" aria-labelledby="login-title">
+        <div class="login-mark" aria-hidden="true">Q</div>
+        <p class="login-eyebrow">PRIVATE SPACE</p>
+        <h1 id="login-title">登录后继续</h1>
+        <p class="login-intro">输入账号和密码，进入功能中心。</p>
+        <form id="site-login-form" novalidate>
+          <label for="site-username">账号</label>
+          <input id="site-username" name="username" type="text" autocomplete="username" maxlength="128" required autofocus>
+          <label for="site-password">密码</label>
+          <input id="site-password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
+          <button id="site-login-button" type="submit">登录</button>
+          <p id="site-login-status" class="login-status" role="alert" aria-live="polite"></p>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

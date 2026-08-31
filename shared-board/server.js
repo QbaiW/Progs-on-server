@@ -31,6 +31,7 @@ const DEFAULT_DATA_DIR = process.env.BOARD_DATA_DIR || path.join(ROOT, "data");
 const DEFAULT_HOST = process.env.HOST || "127.0.0.1";
 const DEFAULT_PORT = Number(process.env.PORT || 8787);
 const PORTAL_ENTRY = "/portal/home.html";
+const LOGIN_ENTRY = "/login.html";
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_NOTE_LENGTH = 2000;
 const MAX_NOTE_COUNT = 500;
@@ -50,6 +51,7 @@ const WRONG_HIT_WINDOW_MS = 60 * 1000;
 const WRONG_HIT_LIMIT = 240;
 const WRONG_VISITOR_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{3,127}$/;
 const SESSION_COOKIE = "star_bottle_owner";
+const SITE_SESSION_COOKIE = "star_bottle_access";
 const PORTAL_VISITOR_COOKIE = "myuan_portal_visitor";
 const PORTAL_VISITOR_COOKIE_SECONDS = 365 * 24 * 60 * 60;
 const DEFAULT_SESSION_HOURS = 12;
@@ -330,6 +332,18 @@ function requestIsSecure(request) {
 function sessionCookie(token, request, maxAgeSeconds) {
   const parts = [
     `${SESSION_COOKIE}=${token}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Strict",
+    `Max-Age=${Math.max(0, Math.floor(maxAgeSeconds))}`,
+  ];
+  if (requestIsSecure(request)) parts.push("Secure");
+  return parts.join("; ");
+}
+
+function siteSessionCookie(token, request, maxAgeSeconds) {
+  const parts = [
+    `${SITE_SESSION_COOKIE}=${token}`,
     "Path=/",
     "HttpOnly",
     "SameSite=Strict",
@@ -853,20 +867,36 @@ function readFavorites(favoritesFile) {
   }
 }
 
-function readSettings(settingsFile, passwordOverride) {
+function readSettings(settingsFile, passwordOverride, authOptions = {}) {
   let raw = {};
   try {
     raw = JSON.parse(fs.readFileSync(settingsFile, "utf8"));
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
-  const password = passwordOverride || process.env.OWNER_PASSWORD || raw.ownerPassword;
-  if (typeof password !== "string" || password.length < 6) {
+  const ownerPassword = passwordOverride || process.env.OWNER_PASSWORD || raw.ownerPassword;
+  if (typeof ownerPassword !== "string" || ownerPassword.length < 6) {
     throw new Error("Set OWNER_PASSWORD or provide data/settings.json with an ownerPassword of at least 6 characters");
+  }
+  // Site access is deliberately separate from the owner/editor session. It
+  // defaults to the existing owner password so an installation gets the new
+  // gate without a data migration, while allowing a distinct credential in
+  // production through SITE_USERNAME/SITE_PASSWORD.
+  const siteUsername = authOptions.siteUsername || authOptions.username ||
+    process.env.SITE_USERNAME || raw.siteUsername || "QbaiW";
+  const sitePassword = authOptions.sitePassword || authOptions.password ||
+    process.env.SITE_PASSWORD || raw.sitePassword || ownerPassword;
+  if (typeof siteUsername !== "string" || siteUsername.length < 1 || siteUsername.length > 128) {
+    throw new Error("SITE_USERNAME must contain 1 to 128 characters");
+  }
+  if (typeof sitePassword !== "string" || sitePassword.length < 6) {
+    throw new Error("SITE_PASSWORD must contain at least 6 characters");
   }
   const configuredHours = Number(process.env.SESSION_HOURS || raw.sessionHours);
   return {
-    ownerPassword: password,
+    ownerPassword,
+    siteUsername,
+    sitePassword,
     sessionHours: Number.isFinite(configuredHours)
       ? Math.min(168, Math.max(1, configuredHours))
       : DEFAULT_SESSION_HOURS,
@@ -903,7 +933,13 @@ function createStarBottleServer(options = {}) {
   const wrongCounterFile = path.join(dataDir, "wrong-counter.json");
   const portalSettingsFile = path.join(dataDir, "portal-settings.json");
   const portalActivityFile = path.join(dataDir, "portal-activity.json");
-  const settings = readSettings(settingsFile, options.ownerPassword);
+  const settings = readSettings(settingsFile, options.ownerPassword, options);
+  // The public site is protected by default. Tests and local migration tools
+  // can explicitly opt out through constructor options without exposing a
+  // production environment switch that could disable the gate by accident.
+  const explicitSiteAuth = options.siteAuth ?? options.requireSiteAuth ??
+    (options.disableSiteAuth === undefined ? undefined : !options.disableSiteAuth);
+  const siteAuthEnabled = explicitSiteAuth !== false;
   let notesDocument = readNotes(notesFile);
   let notesSignature = JSON.stringify(notesDocument);
   let activityDocument = readActivity(activityFile);
@@ -919,7 +955,9 @@ function createStarBottleServer(options = {}) {
   let favoritesReloadTimer = null;
 
   const sessions = new Map();
+  const siteSessions = new Map();
   const loginAttempts = new Map();
+  const siteLoginAttempts = new Map();
   const activityAttempts = new Map();
   const favoriteAttempts = new Map();
   const loveStarsMessageAttempts = new Map();
@@ -941,6 +979,88 @@ function createStarBottleServer(options = {}) {
     return null;
   }
 
+  function siteSessionFor(request) {
+    const cookieToken = parseCookies(request.headers.cookie).get(SITE_SESSION_COOKIE);
+    const authorization = String(request.headers.authorization || "");
+    const bearerMatch = authorization.match(/^Bearer\s+([A-Za-z0-9_-]{32,128})$/i);
+    const candidates = [cookieToken, bearerMatch?.[1]].filter(Boolean);
+    for (const token of candidates) {
+      const session = siteSessions.get(token);
+      if (session?.expiresAt > Date.now()) return { token, ...session };
+      siteSessions.delete(token);
+    }
+    return null;
+  }
+
+  function hasSiteAccess(request) {
+    // Keep the public site credential separate from the owner/editor session.
+    // Knowing the owner password alone must not bypass the account prompt.
+    return Boolean(siteSessionFor(request));
+  }
+
+  function isSiteAuthEndpoint(pathname) {
+    return pathname === "/api/site/login" ||
+      pathname === "/api/site/login/" ||
+      pathname === "/api/site/logout" ||
+      pathname === "/api/site/logout/" ||
+      pathname === "/api/site/status" ||
+      pathname === "/api/site/status/" ||
+      pathname === "/api/auth/login" ||
+      pathname === "/api/auth/login/" ||
+      pathname === "/api/auth/logout" ||
+      pathname === "/api/auth/logout/" ||
+      pathname === "/api/auth/status" ||
+      pathname === "/api/auth/status/";
+  }
+
+  function isPublicSitePath(pathname) {
+    return pathname === "/login" ||
+      pathname === "/login/" ||
+      pathname === LOGIN_ENTRY ||
+      pathname === "/login.css" ||
+      pathname === "/login.js" ||
+      pathname === "/api/health" ||
+      isSiteAuthEndpoint(pathname) ||
+      pathname === "/api/owner/login" ||
+      pathname === "/api/owner/login/" ||
+      pathname === "/api/owner/logout" ||
+      pathname === "/api/owner/logout/" ||
+      pathname === "/api/owner/status" ||
+      pathname === "/api/owner/status/";
+  }
+
+  function writeSiteAuthRequired(request, response, pathname = "") {
+    // API callers need a machine-readable response. Every other request is a
+    // browser/page/resource request and is sent through the login page. The
+    // return target is always a same-origin path derived from the request URL.
+    if (!String(pathname).startsWith("/api/")) {
+      let parsed;
+      try {
+        parsed = new URL(request.url || "/", "http://localhost");
+      } catch {
+        parsed = new URL("/", "http://localhost");
+      }
+      let returnPath = `${parsed.pathname}${parsed.search}`;
+      if (
+        !returnPath.startsWith("/") ||
+        returnPath.startsWith("//") ||
+        returnPath.includes("\\")
+      ) returnPath = "/home";
+      const encoded = encodeURIComponent(returnPath.slice(0, 512));
+      response.writeHead(302, {
+        Location: `/login?return=${encoded}`,
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+      });
+      response.end();
+      return;
+    }
+    writeJson(response, 401, { error: "Site login required", code: "SITE_LOGIN_REQUIRED" }, {
+      "WWW-Authenticate": "Bearer",
+    });
+  }
+
   function portalVisitorFor(request, { create = true } = {}) {
     const existing = parseCookies(request.headers.cookie).get(PORTAL_VISITOR_COOKIE) || "";
     if (PORTAL_VISITOR_ID_PATTERN.test(existing)) return { id: existing, created: false };
@@ -956,8 +1076,29 @@ function createStarBottleServer(options = {}) {
     response.write(`data: ${JSON.stringify(payload)}\n\n`);
   }
 
+  function closeEventClient(clientId, client) {
+    eventClients.delete(clientId);
+    client.response.end();
+  }
+
+  function closeSiteEventClients(siteToken) {
+    if (!siteToken) return;
+    for (const [clientId, client] of eventClients) {
+      if (client.siteToken === siteToken) closeEventClient(clientId, client);
+    }
+  }
+
   function broadcast(eventName, payload) {
-    for (const response of eventClients.values()) sendEvent(response, eventName, payload);
+    const now = Date.now();
+    for (const [clientId, client] of eventClients) {
+      const siteSession = client.siteToken ? siteSessions.get(client.siteToken) : null;
+      if (siteAuthEnabled && (!siteSession || siteSession.expiresAt <= now)) {
+        if (client.siteToken) siteSessions.delete(client.siteToken);
+        closeEventClient(clientId, client);
+        continue;
+      }
+      sendEvent(client.response, eventName, payload);
+    }
   }
 
   function saveNotes(nextDocument) {
@@ -1094,23 +1235,24 @@ function createStarBottleServer(options = {}) {
     });
   }
 
-  function isRateLimited(request) {
+  function isRateLimited(request, attemptsByAddress = loginAttempts) {
     const address = clientAddress(request);
     const now = Date.now();
-    const recent = (loginAttempts.get(address) || []).filter((time) => now - time < LOGIN_WINDOW_MS);
-    loginAttempts.set(address, recent);
+    const recent = (attemptsByAddress.get(address) || [])
+      .filter((time) => now - time < LOGIN_WINDOW_MS);
+    attemptsByAddress.set(address, recent);
     return recent.length >= LOGIN_ATTEMPT_LIMIT;
   }
 
-  function recordFailedLogin(request) {
+  function recordFailedLogin(request, attemptsByAddress = loginAttempts) {
     const address = clientAddress(request);
-    const recent = loginAttempts.get(address) || [];
+    const recent = attemptsByAddress.get(address) || [];
     recent.push(Date.now());
-    loginAttempts.set(address, recent);
+    attemptsByAddress.set(address, recent);
   }
 
-  function clearFailedLogins(request) {
-    loginAttempts.delete(clientAddress(request));
+  function clearFailedLogins(request, attemptsByAddress = loginAttempts) {
+    attemptsByAddress.delete(clientAddress(request));
   }
 
   function activityRateLimited(request) {
@@ -1387,17 +1529,20 @@ function createStarBottleServer(options = {}) {
     const normalizedPath = pathname.length > 1 && pathname.endsWith("/")
       ? pathname.slice(0, -1)
       : pathname;
-    const feature = normalizedPath === "/home"
+    const isLoginPage = normalizedPath === "/login";
+    const feature = normalizedPath === "/home" || isLoginPage
       ? null
       : featureForPath(normalizedPath, featureRegistry);
-    const entry = normalizedPath === "/home"
+    const entry = isLoginPage
+      ? LOGIN_ENTRY
+      : normalizedPath === "/home"
       ? PORTAL_ENTRY
       : feature?.entry;
     if (!entry) return false;
 
     const entryPath = await resolveRegisteredEntry(entry);
     if (!entryPath) return false;
-    if (request.method === "GET") {
+    if (request.method === "GET" && !isLoginPage) {
       const visitor = portalVisitorFor(request);
       if (visitor.created) response.setHeader("Set-Cookie", portalVisitorCookie(visitor.id, request));
       recordPortalPageActivity(request, visitor.id, feature);
@@ -1406,6 +1551,102 @@ function createStarBottleServer(options = {}) {
   }
 
   async function handleApi(request, response, pathname) {
+    const siteAuthMatch = pathname.match(/^\/api\/(?:auth|site)\/(login|logout|status)\/?$/);
+    if (siteAuthMatch) {
+      const action = siteAuthMatch[1];
+      if (request.method === "OPTIONS") {
+        writeJson(response, 200, { ok: true }, {
+          Allow: action === "login" ? "POST, OPTIONS" : action === "status" ? "GET, HEAD, OPTIONS" : "POST, OPTIONS",
+          "Access-Control-Allow-Methods": action === "login" || action === "logout"
+            ? "POST, OPTIONS"
+            : "GET, HEAD, OPTIONS",
+          "Access-Control-Allow-Headers": "Accept, Content-Type, Authorization",
+        });
+        return true;
+      }
+
+      if (action === "status" && (request.method === "GET" || request.method === "HEAD")) {
+        writeJson(response, 200, {
+          // When enforcement is disabled, every request is effectively
+          // authenticated from the caller's perspective.
+          authenticated: siteAuthEnabled ? hasSiteAccess(request) : true,
+        }, { Allow: "GET, HEAD, OPTIONS" });
+        return true;
+      }
+
+      if (action === "logout" && request.method === "POST") {
+        const session = siteSessionFor(request);
+        if (session) {
+          siteSessions.delete(session.token);
+          closeSiteEventClients(session.token);
+        }
+        writeJson(response, 200, { authenticated: false }, {
+          Allow: "POST, OPTIONS",
+          "Set-Cookie": siteSessionCookie("", request, 0),
+        });
+        return true;
+      }
+
+      if (action === "login" && request.method === "POST") {
+        if (isRateLimited(request, siteLoginAttempts)) {
+          writeJson(response, 429, { error: "登录尝试次数过多，请稍后再试", code: "LOGIN_RATE_LIMITED" }, {
+            Allow: "POST, OPTIONS",
+          });
+          return true;
+        }
+
+        try {
+          const body = await readJsonBody(request);
+          const submittedUsername = typeof body.username === "string"
+            ? body.username
+            : typeof body.account === "string"
+              ? body.account
+              : "";
+          const submittedPassword = typeof body.password === "string" ? body.password : "";
+          // Evaluate both comparisons before branching so a bad username does
+          // not skip the password comparison and create an avoidable timing
+          // distinction.
+          const usernameMatches = safeEqual(submittedUsername, settings.siteUsername);
+          const passwordMatches = safeEqual(submittedPassword, settings.sitePassword);
+          if (!usernameMatches || !passwordMatches) {
+            recordFailedLogin(request, siteLoginAttempts);
+            writeJson(response, 401, {
+              authenticated: false,
+              error: "账号或密码不正确",
+              code: "INVALID_CREDENTIALS",
+            }, { Allow: "POST, OPTIONS" });
+            return true;
+          }
+
+          clearFailedLogins(request, siteLoginAttempts);
+          const token = crypto.randomBytes(32).toString("base64url");
+          const sessionSeconds = settings.sessionHours * 60 * 60;
+          const expiresAt = Date.now() + sessionSeconds * 1000;
+          siteSessions.set(token, { expiresAt });
+          writeJson(response, 200, {
+            authenticated: true,
+            expiresAt: new Date(expiresAt).toISOString(),
+          }, {
+            Allow: "POST, OPTIONS",
+            "Set-Cookie": siteSessionCookie(token, request, sessionSeconds),
+          });
+        } catch (error) {
+          writeJson(response, error.statusCode || 400, {
+            authenticated: false,
+            error: error.message || "登录失败",
+            code: error.storageCode,
+          }, { Allow: "POST, OPTIONS" });
+        }
+        return true;
+      }
+
+      const allowedMethods = action === "status" ? "GET, HEAD, OPTIONS" : "POST, OPTIONS";
+      writeJson(response, 405, { error: `${action === "status" ? "GET" : "POST"} is required` }, {
+        Allow: allowedMethods,
+      });
+      return true;
+    }
+
     const featureCatalogPath = pathname === "/api/features" || pathname === "/api/features/";
     if (featureCatalogPath && (request.method === "GET" || request.method === "HEAD")) {
       writeJson(response, 200, {
@@ -1837,16 +2078,22 @@ function createStarBottleServer(options = {}) {
     }
 
     if (pathname === "/api/events" && request.method === "GET") {
+      const siteSession = siteAuthEnabled ? siteSessionFor(request) : null;
+      if (siteAuthEnabled && !siteSession) {
+        writeSiteAuthRequired(request, response, pathname);
+        return true;
+      }
       const clientId = crypto.randomUUID();
       response.writeHead(200, {
         "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
+        "Cache-Control": "private, no-store, no-transform",
+        Vary: "Cookie",
         Connection: "keep-alive",
         "X-Accel-Buffering": "no",
         "X-Content-Type-Options": "nosniff",
       });
       response.write(": connected\n\n");
-      eventClients.set(clientId, response);
+      eventClients.set(clientId, { response, siteToken: siteSession?.token || null });
       sendEvent(response, "notes", notesDocument);
       sendEvent(response, "favorites", favoritesDocument);
       request.on("close", () => eventClients.delete(clientId));
@@ -2419,10 +2666,14 @@ function createStarBottleServer(options = {}) {
       const stats = await fs.promises.stat(filePath);
       if (!stats.isFile()) return false;
       const content = request.method === "HEAD" ? null : await fs.promises.readFile(filePath);
+      const cacheControl = siteAuthEnabled
+        ? extension === ".html" ? "private, no-store" : "private, max-age=3600"
+        : extension === ".html" ? "no-cache" : "public, max-age=3600";
       response.writeHead(200, {
         "Content-Type": contentType,
         "Content-Length": stats.size,
-        "Cache-Control": extension === ".html" ? "no-cache" : "public, max-age=3600",
+        "Cache-Control": cacheControl,
+        ...(siteAuthEnabled ? { Vary: "Cookie" } : {}),
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "no-referrer",
         "X-Frame-Options": "DENY",
@@ -2487,6 +2738,14 @@ function createStarBottleServer(options = {}) {
       const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
       const pathname = url.pathname;
 
+      // CORS preflight carries no application data and can be handled before
+      // a session is established.
+      if (siteAuthEnabled && request.method !== "OPTIONS" &&
+        !isPublicSitePath(pathname) && !hasSiteAccess(request)) {
+        writeSiteAuthRequired(request, response, pathname);
+        return;
+      }
+
       if (pathname.startsWith("/api/")) {
         const handled = await handleApi(request, response, pathname);
         if (!handled) writeJson(response, 404, { error: "API endpoint not found" });
@@ -2513,15 +2772,26 @@ function createStarBottleServer(options = {}) {
   });
 
   const heartbeat = setInterval(() => {
-    for (const response of eventClients.values()) response.write(": heartbeat\n\n");
     const now = Date.now();
     for (const [token, session] of sessions) {
       if (session.expiresAt <= now) sessions.delete(token);
     }
-    for (const [address, attempts] of loginAttempts) {
-      const recent = attempts.filter((time) => now - time < LOGIN_WINDOW_MS);
-      if (recent.length) loginAttempts.set(address, recent);
-      else loginAttempts.delete(address);
+    for (const [token, session] of siteSessions) {
+      if (session.expiresAt <= now) siteSessions.delete(token);
+    }
+    for (const [clientId, client] of eventClients) {
+      if (siteAuthEnabled && (!client.siteToken || !siteSessions.has(client.siteToken))) {
+        closeEventClient(clientId, client);
+        continue;
+      }
+      client.response.write(": heartbeat\n\n");
+    }
+    for (const attemptsByAddress of [loginAttempts, siteLoginAttempts]) {
+      for (const [address, attempts] of attemptsByAddress) {
+        const recent = attempts.filter((time) => now - time < LOGIN_WINDOW_MS);
+        if (recent.length) attemptsByAddress.set(address, recent);
+        else attemptsByAddress.delete(address);
+      }
     }
     for (const [address, attempts] of activityAttempts) {
       const recent = attempts.filter((time) => now - time < 60_000);
@@ -2557,8 +2827,10 @@ function createStarBottleServer(options = {}) {
     clearTimeout(favoritesReloadTimer);
     if (watcher) watcher.close();
     watcher = null;
-    for (const response of eventClients.values()) response.end();
+    for (const [clientId, client] of eventClients) closeEventClient(clientId, client);
     eventClients.clear();
+    sessions.clear();
+    siteSessions.clear();
   }
 
   server.on("close", cleanup);

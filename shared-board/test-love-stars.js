@@ -23,6 +23,7 @@ async function startFixture(t) {
   const server = createStarBottleServer({
     dataDir,
     ownerPassword: TEST_PASSWORD,
+    disableSiteAuth: true,
     watch: false,
   });
   await new Promise((resolve, reject) => {

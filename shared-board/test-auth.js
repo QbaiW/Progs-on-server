@@ -52,6 +52,7 @@ test("background music endpoint lists only supported files", async (context) => 
     dataDir: temporaryDirectory,
     publicDir: publicDirectory,
     ownerPassword: TEST_PASSWORD,
+    disableSiteAuth: true,
     watch: false,
   });
   await new Promise((resolve, reject) => {
@@ -90,6 +91,7 @@ test("viewers are read-only and an authenticated owner can edit a note", async (
   const server = createStarBottleServer({
     dataDir: temporaryDirectory,
     ownerPassword: TEST_PASSWORD,
+    disableSiteAuth: true,
     watch: false,
   });
   await new Promise((resolve, reject) => {
@@ -238,6 +240,7 @@ test("owner can create, delete, and control a note's read status", async (contex
   const server = createStarBottleServer({
     dataDir: temporaryDirectory,
     ownerPassword: TEST_PASSWORD,
+    disableSiteAuth: true,
     watch: false,
   });
   await new Promise((resolve, reject) => {

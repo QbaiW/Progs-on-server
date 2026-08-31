@@ -228,8 +228,11 @@ function Push-Data {
         }
 
         $remoteFiles = ($uploadNames | ForEach-Object { "$remoteStage/$_" }) -join " "
-        $nodeCode = 'const fs=require("fs"); for (const f of process.argv.slice(1)) JSON.parse(fs.readFileSync(f,"utf8"));'
-        $validateCommand = "node -e '$nodeCode' $remoteFiles"
+        # Windows OpenSSH can strip embedded quotes from a remote `node -e`
+        # command. Pipe a base64-encoded validator through node instead.
+        $nodeCode = 'const fs=require("fs"); for (const f of process.argv.slice(2)) JSON.parse(fs.readFileSync(f,"utf8"));'
+        $nodeCodeBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($nodeCode))
+        $validateCommand = "printf %s $nodeCodeBase64 | base64 -d | node - $remoteFiles"
         Write-Host "Validating the server upload..."
         Invoke-Ssh $validateCommand
 
@@ -248,7 +251,13 @@ function Push-Data {
         $finishParts += "rmdir $remoteStage"
         $finishParts += 'pm2 restart qe-star-bottle --update-env'
         $finishParts += 'stopped=0'
-        $finishParts += "curl --fail --silent --show-error --max-time 15 http://127.0.0.1:8787/api/health"
+        # PM2 returns before the Node process has bound its port. Retry the
+        # health check so a normal startup race is not reported as a failed push.
+        $finishParts += 'healthy=0'
+        $finishParts += 'attempt=0'
+        $finishParts += 'while [ "$attempt" -lt 20 ]; do if curl --fail --silent --max-time 15 http://127.0.0.1:8787/api/health >/dev/null; then healthy=1; break; fi; attempt=$((attempt + 1)); sleep 1; done'
+        $finishParts += 'if [ "$healthy" -ne 1 ]; then echo "Health check failed after restart" >&2; exit 1; fi'
+        $finishParts += 'curl --fail --silent --show-error --max-time 15 http://127.0.0.1:8787/api/health'
         Write-Host "Replacing server data and restarting the app..."
         Invoke-Ssh ($finishParts -join "; ")
 

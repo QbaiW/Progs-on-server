@@ -18,7 +18,7 @@
 在宝塔软件商店安装 Node.js 版本管理器，选择 Node.js 20 或 22。然后在宝塔终端执行：
 
 ```bash
-cd /www/wwwroot/qe-star-bottle
+cd /www/wwwroot/qe-star-bottle/shared-board
 npm install --omit=dev --package-lock=false
 npm install -g pm2
 ```
@@ -29,7 +29,7 @@ npm install -g pm2
 
 ## 3. 设置生产环境变量
 
-在宝塔文件管理器新建 `/www/wwwroot/qe-star-bottle/.env`，内容如下。把密码换成新的长密码，不建议继续使用简单数字密码：
+在宝塔文件管理器新建 `/www/wwwroot/qe-star-bottle/shared-board/.env`，内容如下。把密码换成新的长密码，不建议继续使用简单数字密码：
 
 ```dotenv
 NODE_ENV=production
@@ -37,17 +37,19 @@ HOST=127.0.0.1
 PORT=8787
 BOARD_DATA_DIR=/www/wwwroot/qe-star-bottle/data
 OWNER_PASSWORD=replace-with-a-long-random-password
+SITE_USERNAME=QbaiW
+SITE_PASSWORD=replace-with-a-long-random-password
 SESSION_HOURS=12
 ```
 
-`.env` 已加入 `.gitignore`，不要把真实密码提交到 Git 或发到聊天里。设置了 `OWNER_PASSWORD` 和 `SESSION_HOURS` 后，生产环境不依赖 `data/settings.json` 中的密码；已有的设置文件仍可继续保留。
+`.env` 已加入 `.gitignore`，不要把真实密码提交到 Git 或发到聊天里。`SITE_USERNAME` 与 `SITE_PASSWORD` 是进入网站页面的账号密码；`OWNER_PASSWORD` 仍用于站长编辑后台。设置了这些环境变量后，生产环境不依赖 `data/settings.json` 中的密码；已有的设置文件仍可继续保留。
 
 ## 4. 启动并设置自动重启
 
 在项目目录执行：
 
 ```bash
-cd /www/wwwroot/qe-star-bottle
+cd /www/wwwroot/qe-star-bottle/shared-board
 pm2 delete qe-star-bottle 2>/dev/null || true
 pm2 start ecosystem.config.cjs
 pm2 save
@@ -66,6 +68,8 @@ curl http://127.0.0.1:8787/api/health
 ```bash
 pm2 logs qe-star-bottle --lines 100
 ```
+
+以后修改 `.env` 后，执行 `pm2 startOrRestart ecosystem.config.cjs --update-env`，让 PM2 重新读取账号密码等配置。
 
 ## 5. 在宝塔添加网站和 HTTPS
 

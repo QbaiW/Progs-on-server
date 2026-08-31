@@ -29,6 +29,7 @@ async function startFixture(t, options = {}) {
   const server = createStarBottleServer({
     dataDir,
     ownerPassword: TEST_PASSWORD,
+    disableSiteAuth: true,
     watch: false,
     featureRegistry: options.featureRegistry,
   });

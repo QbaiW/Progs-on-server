@@ -31,7 +31,7 @@ Write-Host "Starting the website server..."
 
 $serverIsReady = $false
 try {
-  $response = Invoke-WebRequest -Uri "http://127.0.0.1:8787/api/notes" -UseBasicParsing -TimeoutSec 1
+  $response = Invoke-WebRequest -Uri "http://127.0.0.1:8787/api/health" -UseBasicParsing -TimeoutSec 1
   $serverIsReady = $response.StatusCode -eq 200
 } catch {
   $serverIsReady = $false
@@ -53,7 +53,7 @@ if (-not $serverIsReady) {
     }
 
     try {
-      $response = Invoke-WebRequest -Uri "http://127.0.0.1:8787/api/notes" -UseBasicParsing -TimeoutSec 1
+      $response = Invoke-WebRequest -Uri "http://127.0.0.1:8787/api/health" -UseBasicParsing -TimeoutSec 1
       if ($response.StatusCode -eq 200) {
         $serverIsReady = $true
         break

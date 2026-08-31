@@ -13,14 +13,19 @@ $env:BOARD_DATA_DIR = $localDataDirectory
 $env:HOST = "127.0.0.1"
 $env:PORT = "8787"
 
-if (-not $env:OWNER_PASSWORD) {
-  $localSettingsFile = Join-Path $projectDirectory "data\settings.json"
-  if (Test-Path -LiteralPath $localSettingsFile -PathType Leaf) {
-    $localSettings = Get-Content -LiteralPath $localSettingsFile -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($localSettings.ownerPassword) {
-      $env:OWNER_PASSWORD = [string]$localSettings.ownerPassword
-    }
-  }
+$localSettingsFile = Join-Path $projectDirectory "data\settings.json"
+$localSettings = $null
+if (Test-Path -LiteralPath $localSettingsFile -PathType Leaf) {
+  $localSettings = Get-Content -LiteralPath $localSettingsFile -Raw -Encoding UTF8 | ConvertFrom-Json
+}
+if (-not $env:OWNER_PASSWORD -and $localSettings -and $localSettings.ownerPassword) {
+  $env:OWNER_PASSWORD = [string]$localSettings.ownerPassword
+}
+if (-not $env:SITE_USERNAME -and $localSettings -and $localSettings.siteUsername) {
+  $env:SITE_USERNAME = [string]$localSettings.siteUsername
+}
+if (-not $env:SITE_PASSWORD -and $localSettings -and $localSettings.sitePassword) {
+  $env:SITE_PASSWORD = [string]$localSettings.sitePassword
 }
 
 if (-not $env:OWNER_PASSWORD) {

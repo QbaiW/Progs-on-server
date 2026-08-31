@@ -36,6 +36,7 @@ async function startFixture(t, options = {}) {
     dataDir: temporaryDirectory,
     publicDir: publicDirectory,
     ownerPassword: TEST_PASSWORD,
+    disableSiteAuth: true,
     watch: false,
     featureRegistry: options.featureRegistry,
   });

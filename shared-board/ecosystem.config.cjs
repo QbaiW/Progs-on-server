@@ -47,6 +47,8 @@ module.exports = {
       PORT: process.env.PORT || fileEnv.PORT || "8787",
       BOARD_DATA_DIR: process.env.BOARD_DATA_DIR || fileEnv.BOARD_DATA_DIR || path.join(projectDirectory, "data"),
       OWNER_PASSWORD: process.env.OWNER_PASSWORD || fileEnv.OWNER_PASSWORD,
+      SITE_USERNAME: process.env.SITE_USERNAME || fileEnv.SITE_USERNAME,
+      SITE_PASSWORD: process.env.SITE_PASSWORD || fileEnv.SITE_PASSWORD,
       SESSION_HOURS: process.env.SESSION_HOURS || fileEnv.SESSION_HOURS || "12",
     },
   }],
