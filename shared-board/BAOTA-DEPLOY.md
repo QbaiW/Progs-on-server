@@ -116,7 +116,9 @@ bash shared-board/deploy-server.sh
 ```
 
 脚本会忽略 `npm install` 自动生成的未跟踪 `shared-board/package-lock.json`，但仍会拒绝
-其他未提交的代码改动，以免覆盖服务器上的人工修改。看到 `refusing dirty non-data path`
-时先检查 `git status --short`，不要直接使用 `git reset --hard`。宝塔终端是 Linux shell，
-请逐行粘贴命令；如果出现 `$'\r': command not found`，说明复制内容带入了 Windows 换行符，
-重新手动输入该行即可。
+其他未提交的代码改动，以免覆盖服务器上的人工修改。部署锁使用仓库 `.git` 目录的
+`flock`，不再依赖 `/tmp` 下由某个用户创建的锁文件。如果仓库由 `root`（或其他固定部署用户）
+管理，从 `admin` 终端直接运行时脚本会自动通过 `sudo` 切换到同一用户，避免出现两套 PM2
+进程；不要交替用不同用户手动启动 PM2。看到 `refusing dirty non-data path` 时先检查
+`git status --short`，不要直接使用 `git reset --hard`。宝塔终端是 Linux shell，请逐行粘贴命令；
+如果出现 `$'\r': command not found`，说明复制内容带入了 Windows 换行符，重新手动输入该行即可。
