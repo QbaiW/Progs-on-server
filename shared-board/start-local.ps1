@@ -34,7 +34,7 @@ if (-not $env:OWNER_PASSWORD) {
 
 & (Join-Path $projectDirectory "install-3d.ps1")
 
-Write-Host "Starting QE Star Bottle locally..."
+Write-Host "Starting 圆圆和QE的星空小铺 locally..."
 Write-Host "Local URL: http://localhost:8787"
 Write-Host "Local data: $localDataDirectory"
 Write-Host "Close this window to stop the server."

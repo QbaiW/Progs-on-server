@@ -1,6 +1,6 @@
-# 星星瓶（qe-star-bottle）
+# 圆圆和QE的星空小铺（qe-star-bottle）
 
-一个包含多个功能入口的网站的本地开发与数据管理仓库。
+「圆圆和QE的星空小铺」是一个包含多个功能入口的网站的本地开发与数据管理仓库。
 
 - 核心站点位于 `shared-board`（Node.js 服务端与前端资源）。
 - 网站部署在云服务器上（宝塔 + PM2 + Nginx 反向代理）。
@@ -93,7 +93,7 @@ bash shared-board/deploy-server.sh
 
 ### 域名与 HTTPS
 
-宝塔“网站”添加域名，反向代理目标为 `http://127.0.0.1:8787`，并应用 `nginx-star-bottle.conf.example` 中的转发请求头、超时与 `proxy_buffering off` / `proxy_cache off` 等配置；申请并启用 SSL 证书。防火墙（宝塔与云安全组）只开放 `80`、`443` 及必要的 `22`，不要开放 `8787`，因为 Node 已绑定到 `127.0.0.1`。
+宝塔“网站”添加域名，反向代理目标为 `http://127.0.0.1:8787`，并应用 `nginx-starshop.conf.example` 中的转发请求头、超时与 `proxy_buffering off` / `proxy_cache off` 等配置；申请并启用 SSL 证书。防火墙（宝塔与云安全组）只开放 `80`、`443` 及必要的 `22`，不要开放 `8787`，因为 Node 已绑定到 `127.0.0.1`。
 
 详细步骤见 [shared-board/BAOTA-DEPLOY.md](shared-board/BAOTA-DEPLOY.md)。
 

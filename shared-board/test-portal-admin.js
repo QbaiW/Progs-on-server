@@ -253,7 +253,7 @@ test("forwarded address spoofing does not bypass owner login throttling", async 
   });
   assert.equal(limited.status, 429);
 
-  const nginx = fs.readFileSync(path.join(__dirname, "nginx-star-bottle.conf.example"), "utf8");
+  const nginx = fs.readFileSync(path.join(__dirname, "nginx-starshop.conf.example"), "utf8");
   assert.match(nginx, /proxy_set_header X-Forwarded-For \$remote_addr;/);
   assert.match(nginx, /proxy_set_header CF-Connecting-IP "";/);
   const portalScript = fs.readFileSync(path.join(__dirname, "public", "portal", "home.js"), "utf8");

@@ -276,7 +276,7 @@ function Push-Data {
 function Show-Menu {
     while ($true) {
         Write-Host ""
-        Write-Host "QE Star Bottle - data transfer"
+        Write-Host "圆圆和QE的星空小铺 - data transfer"
         Write-Host "Local folder: $LocalDataDir"
         Write-Host "[1] Pull server data to local"
         Write-Host "[2] Push local data to server"
