@@ -1072,6 +1072,16 @@ function createStarBottleServer(options = {}) {
       pathname === "/api/owner/status/";
   }
 
+  // Admin/owner APIs are protected by the owner session, not the visitor/site
+  // session. Letting the site gate block them is what made an expired site
+  // session look like a *repeated* owner login prompt: the owner logs in, the
+  // gate still refuses /api/owner/* until a visitor session exists, and the
+  // dialog reopens forever. So owner APIs bypass the site gate entirely.
+  function isOwnerApiPath(pathname) {
+    return pathname === "/api/owner" ||
+      pathname.startsWith("/api/owner/");
+  }
+
   function writeSiteAuthRequired(request, response, pathname = "") {
     // API callers need a machine-readable response. Every other request is a
     // browser/page/resource request and is sent through the login page. The
@@ -2320,11 +2330,17 @@ function createStarBottleServer(options = {}) {
         };
         // Throws with a friendly message when a value is invalid.
         normalizeSettingsDocument(nextSettings);
+        // Compare against the *current* settings before saveSettings rewrites
+        // `settings`, so a credential that actually changed clears its sessions.
+        const siteChanged = (body.siteUsername !== undefined && body.siteUsername !== settings.siteUsername) ||
+          (body.sitePassword !== undefined && body.sitePassword !== settings.sitePassword);
+        const ownerChanged = (body.ownerUsername !== undefined && body.ownerUsername !== settings.ownerUsername) ||
+          (body.ownerPassword !== undefined && body.ownerPassword !== settings.ownerPassword);
         const persisted = saveSettings(nextSettings);
-        // Changing a password invalidates the matching sessions so the new
-        // credential is required immediately.
-        if (body.siteUsername !== undefined || body.sitePassword !== undefined) siteSessions.clear();
-        if (body.ownerUsername !== undefined || body.ownerPassword !== undefined) sessions.clear();
+        // Only invalidate sessions for a credential that actually changed, so
+        // editing e.g. just the visitor password does not log the owner out.
+        if (siteChanged) siteSessions.clear();
+        if (ownerChanged) sessions.clear();
         writeJson(response, 200, {
           saved: true,
           ownerUsername: persisted.ownerUsername,
@@ -2859,7 +2875,7 @@ function createStarBottleServer(options = {}) {
       // CORS preflight carries no application data and can be handled before
       // a session is established.
       if (siteAuthEnabled && request.method !== "OPTIONS" &&
-        !isPublicSitePath(pathname) && !hasSiteAccess(request)) {
+        !isPublicSitePath(pathname) && !isOwnerApiPath(pathname) && !hasSiteAccess(request)) {
         writeSiteAuthRequired(request, response, pathname);
         return;
       }

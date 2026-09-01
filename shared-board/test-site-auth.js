@@ -183,6 +183,43 @@ test("owner session does not bypass the site account gate", async (t) => {
   assert.equal(api.response.status, 401);
 });
 
+test("owner APIs are reachable with an owner session alone (no site login)", async (t) => {
+  const baseUrl = await startFixture(t);
+  const ownerLogin = await requestJson(baseUrl, "/api/owner/login", {
+    method: "POST",
+    body: { username: SITE_USERNAME, password: SITE_PASSWORD },
+  });
+  assert.equal(ownerLogin.response.status, 200);
+  const ownerCookie = cookieFrom(ownerLogin.response);
+
+  // Owner APIs are protected by the owner session, not the visitor/site gate, so
+  // an expired site session cannot loop the owner login dialog forever.
+  const portal = await requestJson(baseUrl, "/api/owner/portal", { cookie: ownerCookie });
+  assert.equal(portal.response.status, 200);
+  const creds = await requestJson(baseUrl, "/api/owner/portal/credentials", { cookie: ownerCookie });
+  assert.equal(creds.response.status, 200);
+});
+
+test("a credential change only logs out the role that changed", async (t) => {
+  const baseUrl = await startFixture(t);
+  const ownerLogin = await requestJson(baseUrl, "/api/owner/login", {
+    method: "POST",
+    body: { username: SITE_USERNAME, password: SITE_PASSWORD },
+  });
+  assert.equal(ownerLogin.response.status, 200);
+  const ownerCookie = cookieFrom(ownerLogin.response);
+
+  // Change only the visitor creds; the owner session must stay valid.
+  const saved = await requestJson(baseUrl, "/api/owner/portal/credentials", {
+    method: "PUT",
+    cookie: ownerCookie,
+    body: { siteUsername: "QbaiW", sitePassword: "NewVisitorPass9" },
+  });
+  assert.equal(saved.response.status, 200);
+  const portalAfter = await requestJson(baseUrl, "/api/owner/portal", { cookie: ownerCookie });
+  assert.equal(portalAfter.response.status, 200);
+});
+
 test("site login does not reset owner login throttling", async (t) => {
   const baseUrl = await startFixture(t);
 

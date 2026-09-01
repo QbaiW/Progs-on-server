@@ -764,15 +764,23 @@ async function handleCredentialsSave(event) {
   elements.credentialsSaveButton.disabled = true;
   setStatus(elements.credentialsStatus, "正在保存…");
   try {
+    // Only send fields the admin actually filled; blank passwords/unchanged
+    // usernames keep their current value, so a partial edit does not clear the
+    // other role's session or force a full re-entry.
+    const payload = {};
+    if (elements.credSiteUsername.value.trim()) payload.siteUsername = elements.credSiteUsername.value.trim();
+    if (elements.credSitePassword.value) payload.sitePassword = elements.credSitePassword.value;
+    if (elements.credOwnerUsername.value.trim()) payload.ownerUsername = elements.credOwnerUsername.value.trim();
+    if (elements.credOwnerPassword.value) payload.ownerPassword = elements.credOwnerPassword.value;
+    if (Object.keys(payload).length === 0) {
+      setStatus(elements.credentialsStatus, "请至少填写一项需要修改的账号或密码。 ", "error");
+      elements.credentialsSaveButton.disabled = false;
+      return;
+    }
     const result = await ownerRequest("/api/owner/portal/credentials", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        siteUsername: elements.credSiteUsername.value.trim(),
-        sitePassword: elements.credSitePassword.value,
-        ownerUsername: elements.credOwnerUsername.value.trim(),
-        ownerPassword: elements.credOwnerPassword.value,
-      }),
+      body: JSON.stringify(payload),
     });
     if (result.saved !== true) throw new Error("保存失败。 ");
     if (state.ownerPortal) state.ownerPortal.credentials = {
