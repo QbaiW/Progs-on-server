@@ -141,13 +141,14 @@ test("viewers are read-only and an authenticated owner can edit a note", async (
 
   const wrongLogin = await requestJson(baseUrl, "/api/owner/login", {
     method: "POST",
-    body: { password: "wrong password" },
+    body: { username: "QbaiW", password: "wrong password" },
   });
   assert.equal(wrongLogin.status, 401);
 
   const login = await requestJson(baseUrl, "/api/owner/login", {
     method: "POST",
     body: {
+      username: "QbaiW",
       password: TEST_PASSWORD,
       visitorId: "owner-device-test-01",
       deviceLabel: "测试设备",
@@ -256,7 +257,7 @@ test("owner can create, delete, and control a note's read status", async (contex
   const baseUrl = `http://127.0.0.1:${address.port}`;
   const login = await requestJson(baseUrl, "/api/owner/login", {
     method: "POST",
-    body: { password: TEST_PASSWORD },
+    body: { username: "QbaiW", password: TEST_PASSWORD },
   });
   assert.equal(login.status, 200);
   const cookie = login.headers.get("set-cookie").split(";", 1)[0];

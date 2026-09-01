@@ -6,6 +6,8 @@
     <meta name="theme-color" content="#050713">
     <meta name="description" content="QE给圆圆宝宝的一罐可以打开、收藏与阅读的折纸星星。">
     <title>星星瓶 | 圆圆和QE的星空小铺</title>
+    <link rel="icon" href="/favicon.png" sizes="64x64">
+    <link rel="apple-touch-icon" href="/favicon-180.png">
     <link rel="stylesheet" href="/styles.css?v=20260824-pet21">
     <script type="module" src="/app.js?v=20260824-pet21"></script>
   </head>
@@ -97,6 +99,8 @@
         <form method="dialog" id="ownerLoginForm">
           <button class="plain-icon-button dialog-close" value="cancel" type="submit" title="关闭" aria-label="关闭">×</button>
           <p class="eyebrow">OWNER ACCESS</p><h2>进入星星编辑室</h2>
+          <label for="ownerUsername">管理账号</label>
+          <input id="ownerUsername" name="username" type="text" autocomplete="username" required>
           <label for="ownerPassword">管理密码</label>
           <input id="ownerPassword" name="password" type="password" autocomplete="current-password" required>
           <p class="form-message" id="loginMessage" role="status"></p>

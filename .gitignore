@@ -4,3 +4,6 @@
 # Generated deployment bundles may contain runtime data or server-only files.
 /deploy-package-*/
 /qe-star-bottle-deploy-*.zip
+
+# Local working/design outputs (e.g. image-generation sources) stay out of Git.
+/output/

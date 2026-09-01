@@ -13,7 +13,7 @@
 - `/love-stars`：七夕星空情书。旋转视角，在星尘与双星之间发现一封隐藏的告白。
 - `/wrong`：严格教育现场。点击舞台，看圆圆宝宝拿小锤子敲打 QE。
 
-首次打开会先进入登录页（`SITE_USERNAME` / `SITE_PASSWORD`）。站长编辑使用独立的主人密码（`OWNER_PASSWORD`）。功能注册表在 `config/features.js`，新增功能从这里接入。
+首次打开会先进入登录页。访客登录使用 `SITE_USERNAME` / `SITE_PASSWORD`；站长/管理是独立账号，使用 `OWNER_USERNAME` / `OWNER_PASSWORD`（需要账号+密码）登录，访客登录后无法进入管理界面。两套账号密码都可在管理后台的“账号设置”里修改。功能注册表在 `config/features.js`，新增功能从这里接入。
 
 完整的功能说明、目录结构、本地运行与公网启动步骤，见 [shared-board/README.md](shared-board/README.md)。
 

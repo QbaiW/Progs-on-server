@@ -874,7 +874,7 @@ function readSettings(settingsFile, passwordOverride, authOptions = {}) {
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
-  const ownerPassword = passwordOverride || process.env.OWNER_PASSWORD || raw.ownerPassword;
+  const ownerPassword = passwordOverride || raw.ownerPassword || process.env.OWNER_PASSWORD;
   if (typeof ownerPassword !== "string" || ownerPassword.length < 6) {
     throw new Error("Set OWNER_PASSWORD or provide data/settings.json with an ownerPassword of at least 6 characters");
   }
@@ -883,9 +883,17 @@ function readSettings(settingsFile, passwordOverride, authOptions = {}) {
   // gate without a data migration, while allowing a distinct credential in
   // production through SITE_USERNAME/SITE_PASSWORD.
   const siteUsername = authOptions.siteUsername || authOptions.username ||
-    process.env.SITE_USERNAME || raw.siteUsername || "QbaiW";
+    raw.siteUsername || process.env.SITE_USERNAME || "QbaiW";
   const sitePassword = authOptions.sitePassword || authOptions.password ||
-    process.env.SITE_PASSWORD || raw.sitePassword || ownerPassword;
+    raw.sitePassword || process.env.SITE_PASSWORD || ownerPassword;
+  // The owner/editor login uses its own account (username + password), separate
+  // from the visitor/site credential. Stored values win over the environment so
+  // a change made in the admin panel survives a restart.
+  const ownerUsername = authOptions.ownerUsername ||
+    raw.ownerUsername || process.env.OWNER_USERNAME || siteUsername;
+  if (typeof ownerUsername !== "string" || ownerUsername.length < 1 || ownerUsername.length > 128) {
+    throw new Error("OWNER_USERNAME must contain 1 to 128 characters");
+  }
   if (typeof siteUsername !== "string" || siteUsername.length < 1 || siteUsername.length > 128) {
     throw new Error("SITE_USERNAME must contain 1 to 128 characters");
   }
@@ -894,6 +902,39 @@ function readSettings(settingsFile, passwordOverride, authOptions = {}) {
   }
   const configuredHours = Number(process.env.SESSION_HOURS || raw.sessionHours);
   return {
+    ownerUsername,
+    ownerPassword,
+    siteUsername,
+    sitePassword,
+    sessionHours: Number.isFinite(configuredHours)
+      ? Math.min(168, Math.max(1, configuredHours))
+      : DEFAULT_SESSION_HOURS,
+  };
+}
+
+function normalizeSettingsDocument(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("账号配置必须是对象");
+  }
+  const ownerUsername = typeof raw.ownerUsername === "string" ? raw.ownerUsername.trim() : "";
+  const ownerPassword = typeof raw.ownerPassword === "string" ? raw.ownerPassword : "";
+  const siteUsername = typeof raw.siteUsername === "string" ? raw.siteUsername.trim() : "";
+  const sitePassword = typeof raw.sitePassword === "string" ? raw.sitePassword : "";
+  if (ownerUsername.length < 1 || ownerUsername.length > 128) {
+    throw new Error("管理员账号必须为 1 到 128 个字符");
+  }
+  if (ownerPassword.length < 6) {
+    throw new Error("管理员密码至少 6 个字符");
+  }
+  if (siteUsername.length < 1 || siteUsername.length > 128) {
+    throw new Error("访客账号必须为 1 到 128 个字符");
+  }
+  if (sitePassword.length < 6) {
+    throw new Error("访客密码至少 6 个字符");
+  }
+  const configuredHours = Number(raw.sessionHours);
+  return {
+    ownerUsername,
     ownerPassword,
     siteUsername,
     sitePassword,
@@ -933,7 +974,7 @@ function createStarBottleServer(options = {}) {
   const wrongCounterFile = path.join(dataDir, "wrong-counter.json");
   const portalSettingsFile = path.join(dataDir, "portal-settings.json");
   const portalActivityFile = path.join(dataDir, "portal-activity.json");
-  const settings = readSettings(settingsFile, options.ownerPassword, options);
+  let settings = readSettings(settingsFile, options.ownerPassword, options);
   // The public site is protected by default. Tests and local migration tools
   // can explicitly opt out through constructor options without exposing a
   // production environment switch that could disable the gate by accident.
@@ -1019,6 +1060,8 @@ function createStarBottleServer(options = {}) {
       pathname === LOGIN_ENTRY ||
       pathname === "/login.css" ||
       pathname === "/login.js" ||
+      pathname === "/favicon.png" ||
+      pathname === "/favicon-180.png" ||
       pathname === "/api/health" ||
       isSiteAuthEndpoint(pathname) ||
       pathname === "/api/owner/login" ||
@@ -1157,6 +1200,17 @@ function createStarBottleServer(options = {}) {
       "主页设置",
     );
     portalSettingsDocument = persisted;
+    return persisted;
+  }
+
+  function saveSettings(nextDocument) {
+    const persisted = writeJsonFileSafely(
+      settingsFile,
+      nextDocument,
+      normalizeSettingsDocument,
+      "账号配置",
+    );
+    settings = persisted;
     return persisted;
   }
 
@@ -1475,6 +1529,10 @@ function createStarBottleServer(options = {}) {
     });
     return {
       settings: ownerPortalSettings(),
+      credentials: {
+        ownerUsername: settings.ownerUsername,
+        siteUsername: settings.siteUsername,
+      },
       features,
       visitors: portalVisitorSummaries(),
       activity: {
@@ -2231,6 +2289,57 @@ function createStarBottleServer(options = {}) {
       return true;
     }
 
+    const ownerCredentialsPath = pathname === "/api/owner/portal/credentials" ||
+      pathname === "/api/owner/portal/credentials/";
+    if (ownerCredentialsPath && request.method === "GET") {
+      if (!sessionFor(request)) {
+        writeJson(response, 401, { error: "Owner login required" });
+        return true;
+      }
+      writeJson(response, 200, {
+        ownerUsername: settings.ownerUsername,
+        siteUsername: settings.siteUsername,
+      }, { Allow: "GET, PUT, OPTIONS" });
+      return true;
+    }
+    if (ownerCredentialsPath && request.method === "PUT") {
+      if (!sessionFor(request)) {
+        writeJson(response, 401, { error: "Owner login required" });
+        return true;
+      }
+      try {
+        const body = await readJsonBody(request);
+        if (!plainObject(body)) throw requestError("账号配置格式不正确");
+        assertOnlyKeys(body, new Set(["ownerUsername", "ownerPassword", "siteUsername", "sitePassword"]), "账号配置");
+        const nextSettings = {
+          ownerUsername: body.ownerUsername !== undefined ? body.ownerUsername : settings.ownerUsername,
+          ownerPassword: body.ownerPassword !== undefined ? body.ownerPassword : settings.ownerPassword,
+          siteUsername: body.siteUsername !== undefined ? body.siteUsername : settings.siteUsername,
+          sitePassword: body.sitePassword !== undefined ? body.sitePassword : settings.sitePassword,
+          sessionHours: settings.sessionHours,
+        };
+        // Throws with a friendly message when a value is invalid.
+        normalizeSettingsDocument(nextSettings);
+        const persisted = saveSettings(nextSettings);
+        // Changing a password invalidates the matching sessions so the new
+        // credential is required immediately.
+        if (body.siteUsername !== undefined || body.sitePassword !== undefined) siteSessions.clear();
+        if (body.ownerUsername !== undefined || body.ownerPassword !== undefined) sessions.clear();
+        writeJson(response, 200, {
+          saved: true,
+          ownerUsername: persisted.ownerUsername,
+          siteUsername: persisted.siteUsername,
+        }, { Allow: "GET, PUT, OPTIONS" });
+      } catch (error) {
+        writeJson(response, error.statusCode || 400, { error: error.message || "保存失败" });
+      }
+      return true;
+    }
+    if (ownerCredentialsPath) {
+      writeJson(response, 405, { error: "GET or PUT is required" }, { Allow: "GET, PUT, OPTIONS" });
+      return true;
+    }
+
     const portalVisitorMatch = pathname.match(/^\/api\/owner\/portal\/visitors\/([A-Za-z0-9_-]{8,80})$/);
     if (portalVisitorMatch && request.method === "PUT") {
       if (!sessionFor(request)) {
@@ -2415,9 +2524,18 @@ function createStarBottleServer(options = {}) {
 
       try {
         const body = await readJsonBody(request);
-        if (typeof body.password !== "string" || !safeEqual(body.password, settings.ownerPassword)) {
+        // The owner/editor login requires its own account (username + password),
+        // separate from the visitor/site credential.
+        const submittedOwnerAccount = typeof body.username === "string"
+          ? body.username
+          : typeof body.account === "string"
+            ? body.account
+            : "";
+        const accountMatches = safeEqual(submittedOwnerAccount, settings.ownerUsername);
+        const passwordMatches = safeEqual(body.password || "", settings.ownerPassword);
+        if (!accountMatches || !passwordMatches) {
           recordFailedLogin(request);
-          writeJson(response, 401, { error: "Password is incorrect" });
+          writeJson(response, 401, { error: "账号或密码不正确" });
           return true;
         }
 

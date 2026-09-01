@@ -14,6 +14,7 @@ const elements = {
   ownerTrigger: document.querySelector("#ownerTrigger"),
   loginDialog: document.querySelector("#ownerLoginDialog"),
   loginForm: document.querySelector("#ownerLoginForm"),
+  ownerUsername: document.querySelector("#ownerUsername"),
   ownerPassword: document.querySelector("#ownerPassword"),
   loginButton: document.querySelector("#ownerLoginButton"),
   loginStatus: document.querySelector("#ownerLoginStatus"),
@@ -36,6 +37,13 @@ const elements = {
   featureSettings: document.querySelector("#ownerFeatureSettings"),
   settingsSaveButton: document.querySelector("#ownerSettingsSaveButton"),
   settingsStatus: document.querySelector("#ownerSettingsStatus"),
+  credentialsForm: document.querySelector("#ownerCredentialsForm"),
+  credSiteUsername: document.querySelector("#siteUsername"),
+  credSitePassword: document.querySelector("#sitePassword"),
+  credOwnerUsername: document.querySelector("#credOwnerUsername"),
+  credOwnerPassword: document.querySelector("#credOwnerPassword"),
+  credentialsSaveButton: document.querySelector("#ownerCredentialsSaveButton"),
+  credentialsStatus: document.querySelector("#ownerCredentialsStatus"),
 };
 
 const state = {
@@ -292,8 +300,9 @@ function showDialog(dialog, focusTarget) {
 
 function showOwnerLogin(message = "") {
   setStatus(elements.loginStatus, message, message ? "error" : "");
+  elements.ownerUsername.value = "";
   elements.ownerPassword.value = "";
-  showDialog(elements.loginDialog, elements.ownerPassword);
+  showDialog(elements.loginDialog, elements.ownerUsername);
 }
 
 function friendlyError(error, fallback) {
@@ -548,6 +557,18 @@ function renderSettings(portal) {
   elements.featureSettings.replaceChildren(fragment);
 }
 
+function renderCredentials(portal) {
+  const credentials = portal.credentials && typeof portal.credentials === "object"
+    ? portal.credentials
+    : {};
+  elements.credSiteUsername.value = typeof credentials.siteUsername === "string" ? credentials.siteUsername : "";
+  elements.credOwnerUsername.value = typeof credentials.ownerUsername === "string" ? credentials.ownerUsername : "";
+  // Password values are never returned to the browser; keep them blank so a
+  // fresh value is required before saving.
+  elements.credSitePassword.value = "";
+  elements.credOwnerPassword.value = "";
+}
+
 function renderOwnerPortal(portal) {
   const snapshotFeatures = Array.isArray(portal.features)
     ? portal.features.filter(isFeature).map(normalizeFeature)
@@ -558,6 +579,7 @@ function renderOwnerPortal(portal) {
   renderOverview(portal);
   renderVisitors(portal);
   renderSettings(portal);
+  renderCredentials(portal);
 }
 
 async function loadOwnerPortal({ open = false } = {}) {
@@ -595,8 +617,9 @@ function handleOwnerTrigger() {
 
 async function handleOwnerLogin(event) {
   event.preventDefault();
+  const username = elements.ownerUsername.value.trim();
   const password = elements.ownerPassword.value;
-  if (!password) return;
+  if (!username || !password) return;
   elements.loginButton.disabled = true;
   setStatus(elements.loginStatus, "正在验证…");
   try {
@@ -604,17 +627,19 @@ async function handleOwnerLogin(event) {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({
+        username,
         password,
         deviceLabel: "功能中心",
       }),
     });
     if (result.authenticated !== true) throw new Error("服务器没有确认管理身份。 ");
+    elements.ownerUsername.value = "";
     elements.ownerPassword.value = "";
     elements.loginDialog.close();
     await loadOwnerPortal({ open: true });
   } catch (error) {
     const message = error instanceof ApiError && error.status === 401
-      ? "密码不正确，请重新输入。"
+      ? "管理账号或密码不正确，请重新输入。"
       : friendlyError(error, "登录失败，请稍后再试。 ");
     setStatus(elements.loginStatus, message, "error");
     elements.ownerPassword.select();
@@ -734,6 +759,41 @@ async function handleSettingsSave(event) {
   }
 }
 
+async function handleCredentialsSave(event) {
+  event.preventDefault();
+  elements.credentialsSaveButton.disabled = true;
+  setStatus(elements.credentialsStatus, "正在保存…");
+  try {
+    const result = await ownerRequest("/api/owner/portal/credentials", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        siteUsername: elements.credSiteUsername.value.trim(),
+        sitePassword: elements.credSitePassword.value,
+        ownerUsername: elements.credOwnerUsername.value.trim(),
+        ownerPassword: elements.credOwnerPassword.value,
+      }),
+    });
+    if (result.saved !== true) throw new Error("保存失败。 ");
+    if (state.ownerPortal) state.ownerPortal.credentials = {
+      ownerUsername: typeof result.ownerUsername === "string" ? result.ownerUsername : elements.credOwnerUsername.value.trim(),
+      siteUsername: typeof result.siteUsername === "string" ? result.siteUsername : elements.credSiteUsername.value.trim(),
+    };
+    elements.credSitePassword.value = "";
+    elements.credOwnerPassword.value = "";
+    setStatus(elements.credentialsStatus, "账号与密码已保存", "success");
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      elements.workspaceDialog.close();
+      showOwnerLogin("登录已失效，请重新输入管理账号。 ");
+    } else {
+      setStatus(elements.credentialsStatus, friendlyError(error, "保存失败。 "), "error");
+    }
+  } finally {
+    elements.credentialsSaveButton.disabled = false;
+  }
+}
+
 async function logoutOwner() {
   elements.logoutButton.disabled = true;
   try {
@@ -765,6 +825,7 @@ function bindOwnerUi() {
   elements.logoutButton.addEventListener("click", () => void logoutOwner());
   elements.visitorList.addEventListener("submit", handleVisitorSave);
   elements.settingsForm.addEventListener("submit", handleSettingsSave);
+  elements.credentialsForm.addEventListener("submit", handleCredentialsSave);
   for (const tab of elements.tabs) {
     tab.addEventListener("click", () => activateOwnerTab(tab.dataset.ownerTab));
     tab.addEventListener("keydown", handleTabKeydown);

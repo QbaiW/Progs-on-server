@@ -171,7 +171,7 @@ test("owner session does not bypass the site account gate", async (t) => {
   const baseUrl = await startFixture(t);
   const ownerLogin = await requestJson(baseUrl, "/api/owner/login", {
     method: "POST",
-    body: { password: SITE_PASSWORD },
+    body: { username: SITE_USERNAME, password: SITE_PASSWORD },
   });
   assert.equal(ownerLogin.response.status, 200);
   const ownerCookie = cookieFrom(ownerLogin.response);
@@ -189,7 +189,7 @@ test("site login does not reset owner login throttling", async (t) => {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const ownerLogin = await requestJson(baseUrl, "/api/owner/login", {
       method: "POST",
-      body: { password: `wrong-owner-password-${attempt}` },
+      body: { username: SITE_USERNAME, password: `wrong-owner-password-${attempt}` },
     });
     assert.equal(ownerLogin.response.status, 401);
   }
@@ -202,7 +202,7 @@ test("site login does not reset owner login throttling", async (t) => {
 
   const throttledOwnerLogin = await requestJson(baseUrl, "/api/owner/login", {
     method: "POST",
-    body: { password: SITE_PASSWORD },
+    body: { username: SITE_USERNAME, password: SITE_PASSWORD },
   });
   assert.equal(throttledOwnerLogin.response.status, 429);
 });

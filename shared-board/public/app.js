@@ -49,6 +49,7 @@ const elements = {
   ownerTrigger: document.querySelector("#ownerTrigger"),
   ownerLogin: document.querySelector("#ownerLogin"),
   ownerLoginForm: document.querySelector("#ownerLoginForm"),
+  ownerUsername: document.querySelector("#ownerUsername"),
   ownerPassword: document.querySelector("#ownerPassword"),
   loginMessage: document.querySelector("#loginMessage"),
   editorPanel: document.querySelector("#editorPanel"),
@@ -811,12 +812,13 @@ async function openOwnerAccess() {
     return;
   }
   elements.loginMessage.textContent = "";
+  elements.ownerUsername.value = "";
   elements.ownerPassword.value = "";
   elements.ownerLogin.showModal();
-  requestAnimationFrame(() => elements.ownerPassword.focus());
+  requestAnimationFrame(() => elements.ownerUsername.focus());
 }
 
-async function loginOwner(password) {
+async function loginOwner(username, password) {
   state.visitorId ||= readVisitorId();
   const response = await fetch("/api/owner/login", {
     method: "POST",
@@ -824,6 +826,7 @@ async function loginOwner(password) {
     cache: "no-store",
     credentials: "same-origin",
     body: JSON.stringify({
+      username,
       password,
       visitorId: state.visitorId,
       deviceLabel: currentDeviceLabel(),
@@ -1444,7 +1447,7 @@ function bindUi() {
     event.preventDefault();
     elements.loginMessage.textContent = "正在验证";
     try {
-      await loginOwner(elements.ownerPassword.value);
+      await loginOwner(elements.ownerUsername.value, elements.ownerPassword.value);
       elements.ownerLogin.close();
       setPanel(elements.editorPanel, true);
       renderEditorList();

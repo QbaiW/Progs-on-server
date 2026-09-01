@@ -80,7 +80,7 @@ async function login(baseUrl, cookie = "") {
   const result = await requestJson(baseUrl, "/api/owner/login", {
     method: "POST",
     cookie,
-    body: { password: TEST_PASSWORD },
+    body: { username: "QbaiW", password: TEST_PASSWORD },
   });
   assert.equal(result.status, 200);
   const ownerCookie = responseCookie(result.headers, "star_bottle_owner");
@@ -242,14 +242,14 @@ test("forwarded address spoofing does not bypass owner login throttling", async 
     const failed = await requestJson(baseUrl, "/api/owner/login", {
       method: "POST",
       headers: { "X-Forwarded-For": `198.51.100.${index + 1}, 203.0.113.10` },
-      body: { password: "incorrect-password" },
+      body: { username: "QbaiW", password: "incorrect-password" },
     });
     assert.equal(failed.status, 401);
   }
   const limited = await requestJson(baseUrl, "/api/owner/login", {
     method: "POST",
     headers: { "X-Forwarded-For": "198.51.100.200, 203.0.113.10" },
-    body: { password: "incorrect-password" },
+    body: { username: "QbaiW", password: "incorrect-password" },
   });
   assert.equal(limited.status, 429);
 
