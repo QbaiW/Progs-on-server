@@ -16,6 +16,8 @@
 
 功能中心右上角的“功能中心”在 2.6 秒内连续点击 4 次会打开隐藏的站长入口。它使用独立的管理账号（`OWNER_USERNAME`）与管理密码（`OWNER_PASSWORD`）登录，与访客账号互不通用；登录后可以查看匿名浏览器的主页访问和功能打开记录、填写访客称呼与备注、发布公告、修改卡片标题/说明/重点/强调色，并可在“账号设置”里分别修改访客账号密码和管理员账号密码。详细操作见本机的 `OWNER-ACCESS.txt`。
 
+> 修改过的账号密码保存在 `data/settings.json`，且**优先于 `.env` 里的同名配置**——后台改完重启后仍然生效。如果忘记密码，需要在服务器上直接编辑或删除 `data/settings.json`，或通过后台改回；仅修改 `.env` 不会覆盖已保存的值。
+
 主页展示设置保存到 `data/portal-settings.json`，访问活动保存到 `data/portal-activity.json`。服务端会在访客实际请求 `/home` 或已注册功能页面时记录活动，并用 HttpOnly Cookie 分配匿名浏览器 ID；该标识不等同于真实身份。动态设置只覆盖公开展示字段，不会改变 `config/features.js` 中固定的 `path` 或服务器内部 `entry`。
 
 两个独立功能各自使用命名空间 API 和数据文件：
@@ -57,12 +59,21 @@ lib/feature-registry.js   注册表校验与公开数据投影
 lib/portal-state.js       主页设置和访问活动的数据校验
 public/portal/            功能中心页面、样式和脚本
 public/index.html         星星瓶页面（保留根级资源兼容路径）
+public/login.html         访客登录页
+public/favicon.png        网站图标（64×64，另有一张 favicon-180.png 供苹果/主屏）
 public/love-stars/        七夕星空情书页面及资源
 public/wrong/             严格教育现场页面、Matter.js 和图片资源
+data/notes.json           纸条内容（不提交）
+data/favorites.json       收藏（不提交）
+data/activity.json        星星打开记录（不提交）
+data/owner-devices.json   主人设备名单（不提交）
+data/settings.json        访客/管理员账号密码与会话时长（不提交）
 data/love-stars-messages.json  七夕留言运行数据（不提交）
 data/wrong-counter.json        敲打统计运行数据（不提交）
 data/portal-settings.json      主页公告、卡片覆盖和访客备注（不提交）
 data/portal-activity.json      主页访问与功能打开记录（不提交）
+test-auth.js               鉴权与主人编辑测试
+test-site-auth.js          访客登录门测试
 test-portal.js             门户与注册表测试
 test-portal-admin.js       主页访问记录和站长管理测试
 test-love-stars.js         七夕功能/API 测试
