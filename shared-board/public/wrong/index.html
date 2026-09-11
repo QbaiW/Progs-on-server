@@ -198,6 +198,28 @@
             <ol class="hit-history-list" id="hit-history-list"></ol>
           </section>
 
+          <section class="bubble-editor" aria-labelledby="bubble-editor-title">
+            <div class="history-heading">
+              <div>
+                <p class="admin-kicker">BUBBLES / CONTENT</p>
+                <h3 id="bubble-editor-title">气泡内容</h3>
+              </div>
+              <span class="history-note" id="bubble-note">每行一条 · 保存后立即生效</span>
+            </div>
+            <textarea
+              class="bubble-textarea"
+              id="bubble-phrases"
+              rows="8"
+              spellcheck="false"
+              autocomplete="off"
+              aria-label="气泡内容，每行一条"
+            ></textarea>
+            <div class="bubble-editor-actions">
+              <button class="admin-submit bubble-save" id="bubble-save" type="button">保存气泡内容</button>
+              <p class="bubble-status" id="bubble-status" role="status" aria-live="polite"></p>
+            </div>
+          </section>
+
           <p class="admin-status" id="admin-status" role="status" aria-live="polite"></p>
         </div>
       </section>

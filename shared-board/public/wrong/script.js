@@ -45,6 +45,10 @@
   const adminStats = document.querySelector("#admin-stats");
   const adminRefresh = document.querySelector("#admin-refresh");
   const adminStatus = document.querySelector("#admin-status");
+  const bubblePhrasesInput = document.querySelector("#bubble-phrases");
+  const bubbleSaveButton = document.querySelector("#bubble-save");
+  const bubbleStatus = document.querySelector("#bubble-status");
+  const bubbleNote = document.querySelector("#bubble-note");
   const sharedTotal = document.querySelector("#shared-total");
   const sharedOther = document.querySelector("#shared-other");
   const sharedVisitors = document.querySelector("#shared-visitors");
@@ -154,6 +158,7 @@
       adminStats.hidden = false;
       renderSharedStats(data);
       adminStatus.textContent = "已更新";
+      void loadBubbleEditor();
     } catch (error) {
       adminError.textContent = error?.message || "暂时无法读取统计";
       adminStatus.textContent = "";
@@ -175,6 +180,12 @@
       adminStatsLoading = false;
     }
   });
+
+  if (bubbleSaveButton) {
+    bubbleSaveButton.addEventListener("click", () => {
+      void saveBubbles();
+    });
+  }
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !adminModal.hidden) {
@@ -203,6 +214,28 @@
   requestAnimationFrame(tickPhysics);
 
   async function loadPhrases() {
+    // Server-managed phrases win (they are what the owner edits in the admin
+    // panel), then the bundled text file, then the in-file fallback list.
+    try {
+      const response = await fetch("/api/wrong/phrases", {
+        credentials: "same-origin",
+        cache: "no-store"
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const list = Array.isArray(data?.phrases)
+          ? data.phrases.map((phrase) => String(phrase).trim()).filter(Boolean)
+          : [];
+        if (list.length > 0) {
+          phrases = [...new Set(list)];
+          phraseBag = [];
+          return;
+        }
+      }
+    } catch {
+      // fall through to the static file
+    }
+
     try {
       const response = await fetch(`/wrong/phrases.txt?v=${Date.now()}`, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -217,6 +250,72 @@
     }
 
     phraseBag = [];
+  }
+
+  function setBubbleStatus(message = "", isError = false) {
+    if (!bubbleStatus) return;
+    bubbleStatus.textContent = message;
+    if (isError) bubbleStatus.dataset.state = "error";
+    else delete bubbleStatus.dataset.state;
+  }
+
+  async function loadBubbleEditor() {
+    if (!bubblePhrasesInput) return;
+    setBubbleStatus("正在读取气泡内容…");
+    try {
+      const response = await fetch("/api/wrong/phrases", {
+        credentials: "same-origin",
+        cache: "no-store"
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.ok) throw new Error(data?.error || "读取失败");
+      const list = Array.isArray(data.phrases) ? data.phrases : [];
+      bubblePhrasesInput.value = list.join("\n");
+      if (bubbleNote) {
+        bubbleNote.textContent = `每行一条 · 共 ${list.length}/${data.limit ?? "?"} 条`;
+      }
+      setBubbleStatus("");
+    } catch (error) {
+      setBubbleStatus(error?.message || "读取气泡内容失败", true);
+    }
+  }
+
+  async function saveBubbles() {
+    if (!bubblePhrasesInput || !adminPassword) return;
+    const nextPhrases = bubblePhrasesInput.value
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (nextPhrases.length === 0) {
+      setBubbleStatus("至少填一条气泡内容", true);
+      return;
+    }
+
+    bubbleSaveButton.disabled = true;
+    setBubbleStatus("正在保存…");
+    try {
+      const response = await fetch("/api/wrong/phrases", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "X-Admin-Password": adminPassword },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({ phrases: nextPhrases })
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.ok) throw new Error(data?.error || "保存失败");
+      const saved = Array.isArray(data.phrases) ? data.phrases : nextPhrases;
+      bubblePhrasesInput.value = saved.join("\n");
+      phrases = [...saved];
+      phraseBag = [];
+      if (bubbleNote) {
+        bubbleNote.textContent = `每行一条 · 共 ${saved.length}/${data.limit ?? "?"} 条`;
+      }
+      setBubbleStatus("已保存，新气泡立即生效");
+    } catch (error) {
+      setBubbleStatus(error?.message || "保存失败", true);
+    } finally {
+      bubbleSaveButton.disabled = false;
+    }
   }
 
   function getVisitorId() {

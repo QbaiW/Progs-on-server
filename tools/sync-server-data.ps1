@@ -30,6 +30,7 @@ $requiredDataNames = @(
 $optionalDataNames = @(
     "love-stars-messages.json",
     "wrong-counter.json",
+    "wrong-bubbles.json",
     "portal-settings.json",
     "portal-activity.json"
 )
@@ -101,6 +102,7 @@ function Test-JsonFile([string]$Path, [string]$Name) {
         "owner-devices.json" { "devices" }
         "love-stars-messages.json" { "messages" }
         "wrong-counter.json" { "visitors" }
+        "wrong-bubbles.json" { "phrases" }
         "portal-settings.json" { "features" }
         "portal-activity.json" { "entries" }
     }

@@ -176,3 +176,64 @@ test("Wrong hit and stats APIs use an independent counter file", async (t) => {
   const statsMethod = await requestJson(baseUrl, "/api/wrong/stats", { method: "POST", body: {} });
   assert.equal(statsMethod.response.status, 405);
 });
+
+test("Wrong bubble phrases are readable by anyone but editable only with the admin password", async (t) => {
+  const { baseUrl, dataDir } = await startFixture(t);
+
+  // Reading is open: every signed-in visitor already sees these bubbles.
+  const initial = await requestJson(baseUrl, "/api/wrong/phrases");
+  assert.equal(initial.response.status, 200);
+  assert.equal(initial.body.ok, true);
+  assert.ok(Array.isArray(initial.body.phrases));
+  assert.equal(initial.body.limit, 100);
+  // Seeded from the bundled public/wrong/phrases.txt on first read.
+  assert.ok(initial.body.phrases.includes("对不起，我真的知道错惹"));
+
+  // Writing requires the admin password.
+  const unauthorized = await requestJson(baseUrl, "/api/wrong/phrases", {
+    method: "PUT",
+    body: { phrases: ["nope"] },
+  });
+  assert.equal(unauthorized.response.status, 401);
+
+  const wrongPassword = await requestJson(baseUrl, "/api/wrong/phrases", {
+    method: "PUT",
+    headers: { "X-Admin-Password": "not-the-password" },
+    body: { phrases: ["nope"] },
+  });
+  assert.equal(wrongPassword.response.status, 401);
+
+  // An all-blank list would leave the page with no bubbles.
+  const blank = await requestJson(baseUrl, "/api/wrong/phrases", {
+    method: "PUT",
+    headers: { "X-Admin-Password": TEST_PASSWORD },
+    body: { phrases: ["   ", ""] },
+  });
+  assert.equal(blank.response.status, 400);
+
+  const extraKey = await requestJson(baseUrl, "/api/wrong/phrases", {
+    method: "PUT",
+    headers: { "X-Admin-Password": TEST_PASSWORD },
+    body: { phrases: ["ok"], surprise: true },
+  });
+  assert.equal(extraKey.response.status, 400);
+
+  const saved = await requestJson(baseUrl, "/api/wrong/phrases", {
+    method: "PUT",
+    headers: { "X-Admin-Password": TEST_PASSWORD },
+    body: { phrases: ["宝宝我错了", "宝宝我错了", "  新加的气泡  ", ""] },
+  });
+  assert.equal(saved.response.status, 200);
+  assert.equal(saved.body.ok, true);
+  // trimmed and de-duplicated, in order
+  assert.deepEqual(saved.body.phrases, ["宝宝我错了", "新加的气泡"]);
+
+  const reread = await requestJson(baseUrl, "/api/wrong/phrases");
+  assert.deepEqual(reread.body.phrases, ["宝宝我错了", "新加的气泡"]);
+
+  const stored = JSON.parse(fs.readFileSync(path.join(dataDir, "wrong-bubbles.json"), "utf8"));
+  assert.deepEqual(stored.phrases, ["宝宝我错了", "新加的气泡"]);
+
+  const wrongMethod = await requestJson(baseUrl, "/api/wrong/phrases", { method: "POST", body: {} });
+  assert.equal(wrongMethod.response.status, 405);
+});

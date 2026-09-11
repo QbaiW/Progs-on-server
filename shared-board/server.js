@@ -50,6 +50,8 @@ const WRONG_COUNTER_HISTORY_LIMIT = 500;
 const WRONG_HIT_WINDOW_MS = 60 * 1000;
 const WRONG_HIT_LIMIT = 240;
 const WRONG_VISITOR_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{3,127}$/;
+const WRONG_BUBBLE_MAX_COUNT = 100;
+const WRONG_BUBBLE_MAX_LENGTH = 80;
 const SESSION_COOKIE = "star_bottle_owner";
 const SITE_SESSION_COOKIE = "star_bottle_access";
 const PORTAL_VISITOR_COOKIE = "myuan_portal_visitor";
@@ -726,6 +728,68 @@ function wrongCounterSnapshot(document) {
   };
 }
 
+function emptyWrongBubblesDocument() {
+  return { version: 1, updatedAt: new Date().toISOString(), phrases: [] };
+}
+
+function normalizeWrongBubblePhrases(raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const phrases = [];
+  for (const value of raw) {
+    if (typeof value !== "string") continue;
+    const phrase = value.replace(/\s+/g, " ").trim().slice(0, WRONG_BUBBLE_MAX_LENGTH);
+    if (!phrase || seen.has(phrase)) continue;
+    seen.add(phrase);
+    phrases.push(phrase);
+    if (phrases.length >= WRONG_BUBBLE_MAX_COUNT) break;
+  }
+  return phrases;
+}
+
+function normalizeWrongBubblesDocument(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return emptyWrongBubblesDocument();
+  return {
+    version: Number.isSafeInteger(raw.version) && raw.version > 0 ? raw.version : 1,
+    updatedAt: normalizeTimestamp(raw.updatedAt) || new Date().toISOString(),
+    phrases: normalizeWrongBubblePhrases(raw.phrases),
+  };
+}
+
+function readWrongBubbles(bubblesFile, seedFile) {
+  try {
+    return normalizeWrongBubblesDocument(JSON.parse(fs.readFileSync(bubblesFile, "utf8")));
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  // No stored document yet: seed from the bundled default phrase list so the
+  // feature keeps working and the owner starts from the existing content.
+  if (seedFile) {
+    try {
+      const seeded = fs.readFileSync(seedFile, "utf8")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const phrases = normalizeWrongBubblePhrases(seeded);
+      if (phrases.length) return { version: 1, updatedAt: new Date().toISOString(), phrases };
+    } catch {
+      // fall through to an empty document
+    }
+  }
+  return emptyWrongBubblesDocument();
+}
+
+function wrongBubblesSnapshot(document) {
+  return {
+    ok: true,
+    phrases: document.phrases,
+    count: document.phrases.length,
+    limit: WRONG_BUBBLE_MAX_COUNT,
+    maxLength: WRONG_BUBBLE_MAX_LENGTH,
+    updatedAt: document.updatedAt,
+  };
+}
+
 function emptyActivityDocument() {
   return { version: 1, updatedAt: new Date().toISOString(), entries: [] };
 }
@@ -972,6 +1036,7 @@ function createStarBottleServer(options = {}) {
   const favoritesFile = path.join(dataDir, "favorites.json");
   const loveStarsMessagesFile = path.join(dataDir, "love-stars-messages.json");
   const wrongCounterFile = path.join(dataDir, "wrong-counter.json");
+  const wrongBubblesFile = path.join(dataDir, "wrong-bubbles.json");
   const portalSettingsFile = path.join(dataDir, "portal-settings.json");
   const portalActivityFile = path.join(dataDir, "portal-activity.json");
   let settings = readSettings(settingsFile, options.ownerPassword, options);
@@ -989,6 +1054,10 @@ function createStarBottleServer(options = {}) {
   let favoritesSignature = JSON.stringify(favoritesDocument);
   let loveStarsMessagesDocument = readLoveStarsMessages(loveStarsMessagesFile);
   let wrongCounterDocument = readWrongCounter(wrongCounterFile);
+  let wrongBubblesDocument = readWrongBubbles(
+    wrongBubblesFile,
+    path.join(realPublicDir, "wrong", "phrases.txt"),
+  );
   let portalSettingsDocument = readPortalSettings(portalSettingsFile, registeredFeatureIds);
   let portalActivityDocument = readPortalActivity(portalActivityFile, registeredFeaturePathsById);
   let watcher = null;
@@ -1199,6 +1268,17 @@ function createStarBottleServer(options = {}) {
       "敲打计数",
     );
     wrongCounterDocument = persisted;
+    return persisted;
+  }
+
+  function saveWrongBubbles(nextDocument) {
+    const persisted = writeJsonFileSafely(
+      wrongBubblesFile,
+      nextDocument,
+      normalizeWrongBubblesDocument,
+      "气泡内容",
+    );
+    wrongBubblesDocument = persisted;
     return persisted;
   }
 
@@ -1939,6 +2019,72 @@ function createStarBottleServer(options = {}) {
 
       writeJson(response, 200, wrongCounterSnapshot(wrongCounterDocument), {
         Allow: "GET, HEAD, OPTIONS",
+      });
+      return true;
+    }
+
+    const wrongPhrasesPath = enabledFeatureIds.has("wrong") &&
+      (pathname === "/api/wrong/phrases" || pathname === "/api/wrong/phrases/");
+    if (wrongPhrasesPath && request.method === "OPTIONS") {
+      writeJson(response, 200, { ok: true }, {
+        Allow: "GET, HEAD, PUT, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, HEAD, PUT, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, X-Admin-Password, Authorization",
+      });
+      return true;
+    }
+    if (wrongPhrasesPath && (request.method === "GET" || request.method === "HEAD")) {
+      // Reading the bubble text is not sensitive: every signed-in visitor sees
+      // these bubbles on the page anyway.
+      writeJson(response, 200, wrongBubblesSnapshot(wrongBubblesDocument), {
+        Allow: "GET, HEAD, PUT, OPTIONS",
+      });
+      return true;
+    }
+    if (wrongPhrasesPath && request.method === "PUT") {
+      const headerPassword = String(request.headers["x-admin-password"] || "");
+      const authorization = String(request.headers.authorization || "");
+      const bearerMatch = authorization.match(/^Bearer\s+(.+)$/i);
+      const candidatePassword = headerPassword || bearerMatch?.[1] || "";
+      if (!candidatePassword || !safeEqual(candidatePassword, settings.ownerPassword)) {
+        writeJson(response, 401, { ok: false, error: "Admin password required." }, {
+          Allow: "GET, HEAD, PUT, OPTIONS",
+          "WWW-Authenticate": "X-Admin-Password",
+        });
+        return true;
+      }
+      try {
+        const body = await readJsonBody(request);
+        if (!plainObject(body)) throw requestError("气泡内容格式不正确");
+        assertOnlyKeys(body, new Set(["phrases"]), "气泡内容");
+        if (!Array.isArray(body.phrases)) throw requestError("phrases 必须是数组");
+        if (body.phrases.length > WRONG_BUBBLE_MAX_COUNT) {
+          throw requestError(`气泡最多 ${WRONG_BUBBLE_MAX_COUNT} 条`);
+        }
+        const phrases = normalizeWrongBubblePhrases(body.phrases);
+        if (phrases.length === 0) throw requestError("至少保留一条气泡内容");
+        const persisted = saveWrongBubbles({
+          version: Number.isSafeInteger(wrongBubblesDocument.version) && wrongBubblesDocument.version > 0
+            ? wrongBubblesDocument.version + 1
+            : 2,
+          updatedAt: new Date().toISOString(),
+          phrases,
+        });
+        writeJson(response, 200, wrongBubblesSnapshot(persisted), {
+          Allow: "GET, HEAD, PUT, OPTIONS",
+        });
+      } catch (error) {
+        writeJson(response, error.statusCode || 400, {
+          ok: false,
+          error: error.message || "气泡内容保存失败",
+          code: error.storageCode,
+        });
+      }
+      return true;
+    }
+    if (wrongPhrasesPath) {
+      writeJson(response, 405, { ok: false, error: "GET or PUT is required" }, {
+        Allow: "GET, HEAD, PUT, OPTIONS",
       });
       return true;
     }

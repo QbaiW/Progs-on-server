@@ -48,7 +48,7 @@ qe-star-bottle-deploy-*.zip   (gitignore) 生成的部署压缩包
 - `PULL-SERVER-DATA.cmd`：把服务器数据下载到本地 `server-data\from-server`。
 - `PUSH-SERVER-DATA.cmd`：把该本地文件夹上传到服务器。
 
-四个核心文件（`notes.json`、`favorites.json`、`activity.json`、`owner-devices.json`）总是被同步；功能数据存在时一并同步：`love-stars-messages.json`、`wrong-counter.json`、`portal-settings.json`、`portal-activity.json`。`settings.json` 与 `.env` 永远不会被该工具同步，因为它们包含服务器专属的凭据和配置。
+四个核心文件（`notes.json`、`favorites.json`、`activity.json`、`owner-devices.json`）总是被同步；功能数据存在时一并同步：`love-stars-messages.json`、`wrong-counter.json`、`wrong-bubbles.json`、`portal-settings.json`、`portal-activity.json`。`settings.json` 与 `.env` 永远不会被该工具同步，因为它们包含服务器专属的凭据和配置。
 
 - 拉取会把之前的本地文件夹备份到 `server-data\backups`。推送会在服务器 `/var/backups/qe-star-bottle` 下创建带时间戳的备份，替换数据后重启 PM2，并检查 `/api/health`。
 - 本地服务只读写下载的数据副本，不会直接修改云服务器。需要传回服务器时再运行 `PUSH-SERVER-DATA.cmd`。
@@ -111,8 +111,9 @@ data/owner-devices.json
 data/settings.json
 data/love-stars-messages.json
 data/wrong-counter.json
+data/wrong-bubbles.json
 data/portal-settings.json
 data/portal-activity.json
 ```
 
-后四个文件在对应功能首次产生数据前可能尚不存在。`settings.json` 或生产 `.env` 中含站长密码，不要上传到公开仓库。
+后几个文件在对应功能首次产生数据前可能尚不存在。`settings.json` 或生产 `.env` 中含站长密码，不要上传到公开仓库。

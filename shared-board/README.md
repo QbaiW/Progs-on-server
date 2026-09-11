@@ -23,9 +23,11 @@
 两个独立功能各自使用命名空间 API 和数据文件：
 
 - 七夕星空情书：`/api/love-stars/message`，数据保存到 `data/love-stars-messages.json`。
-- 严格教育现场：`/api/wrong/hit` 与 `/api/wrong/stats`，数据保存到 `data/wrong-counter.json`。
+- 严格教育现场：`/api/wrong/hit` 与 `/api/wrong/stats`，数据保存到 `data/wrong-counter.json`；气泡内容通过 `/api/wrong/phrases` 读写，保存到 `data/wrong-bubbles.json`。
 
-它们不会调用或覆盖星星瓶原有的 `/api/message`、`/api/hit` 数据。敲打统计接口使用统一的 `OWNER_PASSWORD`（或 `data/settings.json` 中的主人密码），不会复制外部项目的密码或 `state.json`。
+严格教育现场页面右上角的 `YY` 按钮会打开它的管理面板（输入管理密码）：除了敲打统计，还有一个「气泡内容」编辑框——**每行一条**，直接修改或新增一行再保存，就能改掉/新增敲打时冒出的气泡文案，保存后立即生效。首次运行时气泡内容会从 `public/wrong/phrases.txt` 播种一份默认值。
+
+它们不会调用或覆盖星星瓶原有的 `/api/message`、`/api/hit` 数据。敲打统计与气泡内容接口使用统一的 `OWNER_PASSWORD`（或 `data/settings.json` 中的主人密码），不会复制外部项目的密码或 `state.json`。
 
 ## 新增功能
 
@@ -70,6 +72,7 @@ data/owner-devices.json   主人设备名单（不提交）
 data/settings.json        访客/管理员账号密码与会话时长（不提交）
 data/love-stars-messages.json  七夕留言运行数据（不提交）
 data/wrong-counter.json        敲打统计运行数据（不提交）
+data/wrong-bubbles.json        教育现场气泡文案，管理员可改（不提交）
 data/portal-settings.json      主页公告、卡片覆盖和访客备注（不提交）
 data/portal-activity.json      主页访问与功能打开记录（不提交）
 test-auth.js               鉴权与主人编辑测试
