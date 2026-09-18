@@ -1,5 +1,6 @@
 "use strict";
 
+const COPY_FIELDS = require("../public/portal/copy.json");
 const MAX_PORTAL_ACTIVITY_ENTRIES = 5000;
 const MAX_ANNOUNCEMENT_LENGTH = 500;
 const MAX_FEATURE_TITLE_LENGTH = 120;
@@ -25,10 +26,13 @@ function cleanText(value, maximum) {
 }
 
 function emptyPortalSettingsDocument() {
+  const copy = Object.fromEntries(COPY_FIELDS.map(([key, , value]) => [key, value]));
   return {
     version: 1,
     updatedAt: new Date().toISOString(),
     announcement: { enabled: false, text: "" },
+    copy,
+    featureOrder: [],
     features: {},
     visitorLabels: {},
   };
@@ -47,6 +51,7 @@ function normalizePortalSettingsDocument(raw, featureIds = null) {
       const description = cleanText(feature.description, MAX_FEATURE_DESCRIPTION_LENGTH);
       const accent = PORTAL_ACCENTS.has(feature.accent) ? feature.accent : "default";
       features[id] = {
+        action: cleanText(feature.action, 120),
         title,
         description,
         featured: feature.featured === true,
@@ -72,6 +77,11 @@ function normalizePortalSettingsDocument(raw, featureIds = null) {
       enabled: raw.announcement?.enabled === true,
       text: cleanText(raw.announcement?.text, MAX_ANNOUNCEMENT_LENGTH),
     },
+    copy: Object.fromEntries(COPY_FIELDS.map(([key, , defaultValue]) => [
+      key,
+      typeof raw.copy?.[key] === "string" ? cleanText(raw.copy[key], 500) : defaultValue,
+    ])),
+    featureOrder: Array.isArray(raw.featureOrder) ? [...new Set(raw.featureOrder.filter(id => typeof id === "string" && (!validFeatureIds || validFeatureIds.has(id))))] : [],
     features,
     visitorLabels,
   };

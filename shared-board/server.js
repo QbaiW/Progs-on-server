@@ -1,5 +1,6 @@
 const http = require("node:http");
 const fs = require("node:fs");
+const PORTAL_COPY_FIELDS = require("./public/portal/copy.json");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const {
@@ -1285,7 +1286,7 @@ function createStarBottleServer(options = {}) {
   function savePortalSettings(nextDocument) {
     const persisted = writeJsonFileSafely(
       portalSettingsFile,
-      nextDocument,
+      { ...portalSettingsDocument, ...nextDocument },
       (raw) => normalizePortalSettingsDocument(raw, registeredFeatureIds),
       "主页设置",
     );
@@ -1516,10 +1517,13 @@ function createStarBottleServer(options = {}) {
   }
 
   function publicPortalFeatures() {
+    const orderedIds = [...portalSettingsDocument.featureOrder, ...listPublicFeatures(featureRegistry).map(f => f.id).filter(id => !portalSettingsDocument.featureOrder.includes(id))];
     return listPublicFeatures(featureRegistry).map((feature) => {
       const override = portalSettingsDocument.features[feature.id];
       return {
         ...feature,
+        order: orderedIds.indexOf(feature.id),
+        action: override?.action || "",
         title: override?.title || feature.title,
         description: override?.description || feature.description,
         featured: override?.featured === true,
@@ -1533,6 +1537,7 @@ function createStarBottleServer(options = {}) {
     for (const feature of featureRegistry.filter((candidate) => candidate.enabled)) {
       const override = portalSettingsDocument.features[feature.id];
       featureSettings[feature.id] = {
+        action: override?.action || "",
         title: override?.title || "",
         description: override?.description || "",
         featured: override?.featured === true,
@@ -1543,6 +1548,8 @@ function createStarBottleServer(options = {}) {
       version: portalSettingsDocument.version,
       updatedAt: portalSettingsDocument.updatedAt,
       announcement: { ...portalSettingsDocument.announcement },
+      copy: { ...portalSettingsDocument.copy },
+      featureOrder: [...portalSettingsDocument.featureOrder],
       features: featureSettings,
     };
   }
@@ -1799,6 +1806,7 @@ function createStarBottleServer(options = {}) {
     if (featureCatalogPath && (request.method === "GET" || request.method === "HEAD")) {
       writeJson(response, 200, {
         version: 1,
+        copy: { ...portalSettingsDocument.copy },
         announcement: publicPortalAnnouncement(),
         features: publicPortalFeatures(),
       }, { Allow: "GET, HEAD, OPTIONS" });
@@ -2343,8 +2351,22 @@ function createStarBottleServer(options = {}) {
       try {
         const body = await readJsonBody(request);
         if (!plainObject(body)) throw requestError("主页设置格式不正确");
-        assertOnlyKeys(body, new Set(["announcement", "features"]), "主页设置");
+        assertOnlyKeys(body, new Set(["announcement", "features", "copy", "featureOrder"]), "主页设置");
 
+        const copy = { ...portalSettingsDocument.copy };
+        if (body.copy !== undefined) {
+          if (!plainObject(body.copy)) throw requestError("首页文字格式不正确");
+          assertOnlyKeys(body.copy, new Set(PORTAL_COPY_FIELDS.map(([key]) => key)), "首页文字");
+          for (const [key, value] of Object.entries(body.copy)) {
+            if (typeof value !== "string" || value.length > 500) throw requestError("首页文字必须是 500 字以内的文本");
+            copy[key] = value.trim();
+          }
+        }
+        let featureOrder = portalSettingsDocument.featureOrder;
+        if (body.featureOrder !== undefined) {
+          if (!Array.isArray(body.featureOrder) || body.featureOrder.some(id => typeof id !== "string" || !registeredFeatureIds.has(id)) || new Set(body.featureOrder).size !== body.featureOrder.length) throw requestError("功能顺序包含重复或无效的功能");
+          featureOrder = body.featureOrder;
+        }
         let announcement = { ...portalSettingsDocument.announcement };
         if (body.announcement !== undefined) {
           if (!plainObject(body.announcement)) throw requestError("公告设置格式不正确");
@@ -2378,7 +2400,7 @@ function createStarBottleServer(options = {}) {
             if (!plainObject(submitted)) throw requestError(`功能 ${featureId} 的设置格式不正确`);
             assertOnlyKeys(
               submitted,
-              new Set(["title", "description", "featured", "accent"]),
+              new Set(["title", "description", "featured", "accent", "action"]),
               `功能 ${featureId} 的设置`,
             );
             const current = features[featureId] || {
@@ -2408,7 +2430,9 @@ function createStarBottleServer(options = {}) {
             if (submitted.accent !== undefined && !PORTAL_ACCENTS.has(submitted.accent)) {
               throw requestError(`功能 ${featureId} 的强调色无效`);
             }
+            if (submitted.action !== undefined && (typeof submitted.action !== "string" || submitted.action.length > 120)) throw requestError("进入按钮文字不能超过 120 字");
             features[featureId] = {
+              action: submitted.action === undefined ? (current.action || "") : submitted.action.trim(),
               title: submitted.title === undefined ? current.title : submitted.title.trim(),
               description: submitted.description === undefined
                 ? current.description
@@ -2423,6 +2447,8 @@ function createStarBottleServer(options = {}) {
           version: portalSettingsDocument.version + 1,
           updatedAt: new Date().toISOString(),
           announcement,
+          copy,
+          featureOrder,
           features,
           visitorLabels: portalSettingsDocument.visitorLabels,
         });

@@ -3,37 +3,49 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="theme-color" content="#11120f">
+    <meta name="theme-color" content="#111c30">
     <meta name="description" content="选择并进入「圆圆和QE的星空小铺」里准备的功能。">
     <title>功能中心 | 圆圆和QE的星空小铺</title>
     <link rel="icon" href="/favicon.png" sizes="64x64">
     <link rel="apple-touch-icon" href="/favicon-180.png">
     <link rel="stylesheet" href="/portal/home.css?v=20260829-portal5">
-    <script type="module" src="/portal/home.js?v=20260829-portal5"></script>
+    <link rel="stylesheet" href="/portal/sky.css?v=20260918">
+    <script type="module" src="/portal/home.js?v=20260918"></script>
+    <script type="module" src="/portal/sky.js?v=20260918"></script>
   </head>
   <body>
-    <a class="skip-link" href="#featureGrid">跳到功能列表</a>
+    <div class="sky-background" aria-hidden="true">
+      <img class="sky-photo is-active" src="/portal/assets/night-sky.png" alt="" fetchpriority="high">
+      <img class="sky-photo" src="/portal/assets/earth.png" alt="">
+    </div>
+    <a class="skip-link" href="#featureGrid" data-copy="skip">跳到功能列表</a>
 
     <header class="site-header">
       <a class="site-brand" href="/home" aria-label="返回功能中心">
-        <span class="brand-mark" aria-hidden="true">Q</span>
+        <span class="brand-mark" aria-hidden="true" data-copy="mark">Q</span>
         <span class="brand-copy">
-          <strong>圆圆和QE的星空小铺</strong>
-          <span>MYUAN.XIN</span>
+          <strong data-copy="brand">圆圆和QE的星空小铺</strong>
+          <span data-copy="domain">MYUAN.XIN</span>
         </span>
       </a>
-      <button class="current-section" id="ownerTrigger" type="button" aria-current="page">功能中心</button>
+      <button class="current-section" id="ownerTrigger" type="button" aria-current="page" data-copy="section">功能中心</button>
     </header>
 
     <main class="portal-main">
       <section class="portal-intro" aria-labelledby="portalTitle">
-        <p class="eyebrow">SPACES</p>
-        <h1 id="portalTitle">选择一个功能</h1>
-        <p>这里收纳我们的网站空间。选一个入口，去想去的地方。</p>
+        <p class="eyebrow" data-copy="eyebrow">圆圆与 QE 的小小宇宙</p>
+        <h1 id="portalTitle" data-copy="headline">星河很远，<br>你在身边。</h1>
+        <p data-copy="intro">把喜欢藏进星星，把日常留在这里。<br>选一个入口，继续我们的故事。</p>
+        <div class="sky-controls" aria-label="背景照片轮换" hidden>
+          <button type="button" class="sky-choice" data-sky="0" data-copy="night" aria-pressed="true">星野</button>
+          <button type="button" class="sky-choice" data-sky="1" data-copy="earth" aria-pressed="false">地球</button>
+          <span class="sky-control-divider" aria-hidden="true"></span>
+          <button type="button" id="skyPause" data-copy="pause" aria-pressed="false">暂停轮换</button>
+        </div>
       </section>
 
       <section class="portal-announcement" id="portalAnnouncement" aria-labelledby="announcementTitle" hidden>
-        <p class="announcement-label" id="announcementTitle">公告</p>
+            <p class="announcement-label" id="announcementTitle" data-copy="announcementLabel">公告</p>
         <p class="announcement-text" id="announcementText"></p>
       </section>
 
@@ -95,7 +107,7 @@
     </main>
 
     <footer class="site-footer">
-      <span>圆圆和QE的星空小铺</span>
+      <span data-copy="footer">圆圆和QE的星空小铺</span>
       <span aria-hidden="true">·</span>
       <span id="featureCount">3 个可用功能</span>
     </footer>
@@ -164,6 +176,10 @@
 
           <section class="workspace-panel admin-panel" id="ownerPanelSettings" role="tabpanel" aria-labelledby="ownerTabSettings" data-owner-panel="settings" hidden>
             <form class="settings-form" id="ownerSettingsForm">
+              <fieldset class="settings-group">
+                <legend>首页文字</legend>
+                <div id="ownerCopySettings" class="copy-settings"></div>
+              </fieldset>
               <fieldset class="settings-group">
                 <legend>首页公告</legend>
                 <label class="checkbox-label toggle-row" for="announcementEnabled">

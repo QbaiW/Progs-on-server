@@ -47,11 +47,53 @@ const elements = {
 };
 
 const state = {
+  copy: {},
+  copyFields: [],
   features: [],
   ownerPortal: null,
   triggerTimes: [],
   ownerLoading: false,
 };
+
+function copyText(key, fallback = "") {
+  return typeof state.copy[key] === "string" ? state.copy[key] : fallback;
+}
+
+function renderCopy(copy = {}) {
+  state.copy = copy;
+  window.portalCopy = copy;
+  for (const node of document.querySelectorAll("[data-copy]")) {
+    if (typeof copy[node.dataset.copy] === "string") node.textContent = copy[node.dataset.copy];
+  }
+  if (typeof copy.pageTitle === "string") document.title = copy.pageTitle;
+  document.querySelector(".site-brand").setAttribute("aria-label", copyText("brand"));
+  document.dispatchEvent(new CustomEvent("portal-copy", { detail: copy }));
+}
+
+async function loadCopyFields() {
+  try {
+    const response = await fetch("/portal/copy.json");
+    if (!response.ok) throw new Error("首页文字字段加载失败");
+    state.copyFields = await response.json();
+    if (state.ownerPortal) renderCopySettings(state.ownerPortal.settings?.copy);
+  } catch {
+    document.querySelector("#ownerCopySettings").textContent = "首页文字设置加载失败，请刷新页面重试。";
+  }
+}
+
+function renderCopySettings(copy = {}) {
+  const fragment = document.createDocumentFragment();
+  for (const [key, label, defaultValue] of state.copyFields) {
+    const input = document.createElement("textarea");
+    input.id = "copy-" + key;
+    input.dataset.copyField = key;
+    input.maxLength = 500;
+    input.rows = ["headline", "intro"].includes(key) ? 3 : 2;
+    input.value = typeof copy[key] === "string" ? copy[key] : defaultValue;
+    fragment.append(createLabeledControl(label, input));
+  }
+  document.querySelector("#ownerCopySettings").replaceChildren(fragment);
+}
 
 class ApiError extends Error {
   constructor(message, status, payload = {}) {
@@ -79,6 +121,7 @@ function isFeature(value) {
 function normalizeFeature(value) {
   return {
     id: value.id,
+    action: typeof value.action === "string" ? value.action.slice(0, 120) : "",
     title: value.title.trim().slice(0, 120),
     description: value.description.trim().slice(0, 500),
     icon: value.icon.slice(0, 12),
@@ -163,7 +206,7 @@ function createFeatureItem(feature) {
   if (feature.featured) {
     const badge = document.createElement("span");
     badge.className = "featured-label";
-    badge.textContent = "重点";
+    badge.textContent = copyText("featured", "重点");
     heading.append(badge);
   }
 
@@ -176,7 +219,7 @@ function createFeatureItem(feature) {
   const arrow = document.createElement("span");
   arrow.textContent = "→";
   arrow.setAttribute("aria-hidden", "true");
-  action.append("进入", arrow);
+  action.append(feature.action || copyText("action", "进入"), arrow);
 
   content.append(heading, description, action);
   link.append(createArtwork(feature), content);
@@ -190,8 +233,9 @@ function renderFeatures(features) {
   for (const feature of sortedFeatures) fragment.append(createFeatureItem(feature));
   state.features = sortedFeatures;
   elements.grid.replaceChildren(fragment);
-  elements.count.textContent = `${sortedFeatures.length} 个可用功能`;
-  elements.status.textContent = sortedFeatures.length ? "功能列表已同步" : "暂时没有可用功能";
+  document.querySelector(".portal-main").classList.toggle("has-many-features", sortedFeatures.length > 3);
+  elements.count.textContent = copyText("count", "{count} 个可用功能").replaceAll("{count}", String(sortedFeatures.length));
+  elements.status.textContent = sortedFeatures.length ? copyText("ready", "功能列表已同步") : copyText("empty", "暂时没有可用功能");
   elements.status.dataset.state = sortedFeatures.length ? "ready" : "empty";
 }
 
@@ -211,6 +255,7 @@ async function loadFeatures({ quiet = false } = {}) {
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
+    renderCopy(payload.copy);
     const features = Array.isArray(payload?.features)
       ? payload.features.filter(isFeature).map(normalizeFeature)
       : [];
@@ -221,8 +266,8 @@ async function loadFeatures({ quiet = false } = {}) {
     if (!state.features.length) state.features = fallbackFeatures();
     if (!quiet) {
       const fallbackCount = elements.grid.children.length;
-      elements.count.textContent = `${fallbackCount} 个可用功能`;
-      elements.status.textContent = "功能列表暂时无法同步，已显示本地入口";
+      elements.count.textContent = copyText("count", "{count} 个可用功能").replaceAll("{count}", String(fallbackCount));
+      elements.status.textContent = copyText("error", "功能列表暂时无法同步，已显示本地入口");
       elements.status.dataset.state = "error";
     }
   }
@@ -502,6 +547,12 @@ function createFeatureSettings(feature, saved = {}) {
   description.value = typeof saved.description === "string" ? saved.description : "";
   description.placeholder = feature.description;
 
+  const action = document.createElement("input");
+  action.name = "action";
+  action.maxLength = 120;
+  action.value = typeof saved.action === "string" ? saved.action : "";
+  action.placeholder = copyText("action", "进入");
+
   const accent = document.createElement("select");
   accent.id = `featureAccent-${feature.id}`;
   accent.name = "accent";
@@ -537,12 +588,17 @@ function createFeatureSettings(feature, saved = {}) {
     createLabeledControl("强调色", accent),
     featuredLabel,
   );
-  fieldset.append(row, createLabeledControl("卡片说明", description));
+  fieldset.append(row, createLabeledControl("卡片说明", description), createLabeledControl("进入按钮文字", action));
+  const move = document.createElement("div");
+  move.className = "feature-order-actions";
+  move.innerHTML = '<button type="button" class="quiet-button" data-move="up">上移</button><button type="button" class="quiet-button" data-move="down">下移</button>';
+  fieldset.append(move);
   return fieldset;
 }
 
 function renderSettings(portal) {
   const settings = portal.settings && typeof portal.settings === "object" ? portal.settings : {};
+  renderCopySettings(settings.copy);
   const announcement = settings.announcement && typeof settings.announcement === "object"
     ? settings.announcement
     : {};
@@ -718,6 +774,7 @@ function collectFeatureSettings() {
     if (!FEATURE_ID_PATTERN.test(id)) continue;
     const accent = fieldset.querySelector("[name='accent']").value;
     features[id] = {
+      action: fieldset.querySelector("[name='action']").value.trim(),
       title: fieldset.querySelector("[name='title']").value.trim(),
       description: fieldset.querySelector("[name='description']").value.trim(),
       featured: fieldset.querySelector("[name='featured']").checked,
@@ -736,6 +793,8 @@ async function handleSettingsSave(event) {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        copy: Object.fromEntries([...document.querySelectorAll("[data-copy-field]")].map(input => [input.dataset.copyField, input.value.trim()])),
+        featureOrder: [...elements.featureSettings.querySelectorAll("[data-feature-settings-id]")].map(fieldset => fieldset.dataset.featureSettingsId),
         announcement: {
           enabled: elements.announcementEnabled.checked,
           text: elements.announcementInput.value.trim(),
@@ -810,7 +869,7 @@ async function logoutOwner() {
   state.ownerPortal = null;
   elements.workspaceDialog.close();
   elements.ownerTrigger.focus();
-  elements.status.textContent = "已退出管理";
+  elements.status.textContent = copyText("logout", "已退出管理");
   elements.status.dataset.state = "ready";
   elements.logoutButton.disabled = false;
 }
@@ -833,6 +892,13 @@ function bindOwnerUi() {
   elements.logoutButton.addEventListener("click", () => void logoutOwner());
   elements.visitorList.addEventListener("submit", handleVisitorSave);
   elements.settingsForm.addEventListener("submit", handleSettingsSave);
+  elements.featureSettings.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-move]");
+    if (!button) return;
+    const fieldset = button.closest("[data-feature-settings-id]");
+    const sibling = button.dataset.move === "up" ? fieldset.previousElementSibling : fieldset.nextElementSibling;
+    if (sibling) button.dataset.move === "up" ? fieldset.parentElement.insertBefore(fieldset, sibling) : fieldset.parentElement.insertBefore(sibling, fieldset);
+  });
   elements.credentialsForm.addEventListener("submit", handleCredentialsSave);
   for (const tab of elements.tabs) {
     tab.addEventListener("click", () => activateOwnerTab(tab.dataset.ownerTab));
@@ -844,6 +910,7 @@ function bindOwnerUi() {
 function start() {
   state.features = fallbackFeatures();
   bindOwnerUi();
+  void loadCopyFields();
   void loadFeatures();
 }
 
