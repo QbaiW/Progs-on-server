@@ -33,4 +33,14 @@ module.exports = Object.freeze([
     order: 30,
     enabled: true,
   }),
+  Object.freeze({
+    id: "world",
+    title: "星空世界",
+    description: "点进去就能玩的 3D 联机世界，朋友们可以一起走动、聊天、放模型。",
+    icon: "✵",
+    path: "/world",
+    entry: "/world/index.html",
+    order: 40,
+    enabled: true,
+  }),
 ]);
