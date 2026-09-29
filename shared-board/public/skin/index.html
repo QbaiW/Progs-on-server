@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>星空世界 · 皮肤</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --line: rgba(150,180,255,.16);
+    --card: rgba(14,18,44,.72);
+    --text: #e8ecff;
+    --muted: #9fb0e0;
+    --dim: #6d7bad;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100%;
+    background: #05060f radial-gradient(ellipse at 50% 0%, #1b2350 0%, #05060f 70%) fixed;
+    color: var(--text);
+    font: 15px/1.7 system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+    padding: 32px 20px 64px;
+  }
+  /* 星尘背景 */
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image:
+      radial-gradient(1.5px 1.5px at 12% 18%, #fff, transparent),
+      radial-gradient(1.5px 1.5px at 78% 12%, #cfe0ff, transparent),
+      radial-gradient(2px 2px at 34% 62%, #fff, transparent),
+      radial-gradient(1.5px 1.5px at 63% 78%, #ffd9f0, transparent),
+      radial-gradient(1.5px 1.5px at 88% 48%, #fff, transparent),
+      radial-gradient(1px 1px at 22% 84%, #cfe0ff, transparent),
+      radial-gradient(1px 1px at 52% 32%, #fff, transparent),
+      radial-gradient(1.5px 1.5px at 7% 55%, #fff, transparent);
+    animation: tw 7s ease-in-out infinite alternate;
+  }
+  @keyframes tw { from { opacity:.5 } to { opacity:1 } }
+
+  .wrap { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; }
+
+  header { text-align: center; margin-bottom: 34px; }
+  header .icon { font-size: 34px; }
+  header h1 { margin: 10px 0 6px; font-size: 26px; letter-spacing: .06em; font-weight: 600; }
+  header p { margin: 0; color: var(--muted); font-size: 14px; }
+  .back {
+    display: inline-block; margin-top: 16px; font-size: 13px; color: var(--muted);
+    text-decoration: none; border-bottom: 1px dashed rgba(150,180,255,.35); padding-bottom: 1px;
+  }
+  .back:hover { color: #fff; }
+
+  .howto {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 18px 22px; margin-bottom: 34px; font-size: 14px; color: var(--muted);
+  }
+  .howto b { color: var(--text); font-weight: 600; }
+  .howto ol { margin: 10px 0 0; padding-left: 20px; }
+  .howto li { margin: 4px 0; }
+  .howto code {
+    background: rgba(120,150,255,.14); border-radius: 5px; padding: 1px 6px;
+    font-size: 13px; color: #cfe0ff;
+  }
+
+  h2 {
+    font-size: 17px; font-weight: 600; letter-spacing: .04em;
+    margin: 38px 0 6px; padding-left: 12px; border-left: 3px solid #6f8cff;
+  }
+  .sub { color: var(--dim); font-size: 13px; margin: 0 0 18px; padding-left: 15px; }
+
+  .grid {
+    display: grid; gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 15px;
+    overflow: hidden; display: flex; flex-direction: column;
+    transition: transform .16s ease, border-color .16s ease;
+  }
+  .card:hover { transform: translateY(-3px); border-color: rgba(150,180,255,.42); }
+  .shot {
+    aspect-ratio: 1; background: #0b0d1c center/cover no-repeat;
+    display: block; width: 100%; object-fit: cover;
+  }
+  .body { padding: 11px 13px 14px; display: flex; flex-direction: column; flex: 1; }
+  .name { font-weight: 600; font-size: 15px; }
+  .en { color: var(--dim); font-size: 12px; margin-top: 1px; }
+  .meta { margin-top: 6px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .tag {
+    font-size: 11px; padding: 1px 7px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted);
+  }
+  .tag.cc0 { color: #8ee6b0; border-color: rgba(120,230,170,.35); }
+  .tag.by  { color: #ffd98a; border-color: rgba(255,210,120,.35); }
+  .desc { color: var(--muted); font-size: 12px; margin-top: 6px; flex: 1; }
+  .dl {
+    display: block; text-align: center; margin-top: 11px; padding: 8px 0;
+    border-radius: 9px; text-decoration: none; font-size: 13px; font-weight: 600;
+    background: linear-gradient(135deg, #6f8cff, #a77bff); color: #fff;
+  }
+  .dl:hover { opacity: .9; }
+
+  .weblist { display: flex; flex-direction: column; gap: 12px; }
+  .web {
+    display: flex; gap: 14px; align-items: flex-start;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 15px 18px;
+  }
+  .web .k { font-size: 20px; line-height: 1.2; }
+  .web .t { font-weight: 600; }
+  .web .d { color: var(--muted); font-size: 13px; margin-top: 3px; }
+  .web a { color: #9db4ff; word-break: break-all; }
+  .web a:hover { color: #fff; }
+
+  footer { margin-top: 46px; text-align: center; color: var(--dim); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="icon">✧</div>
+    <h1>星空世界 · 皮肤</h1>
+    <p>挑一张喜欢的形象，下载后拖进世界里就能用</p>
+    <a class="back" href="/world/index.html">← 回到星空世界</a>
+  </header>
+
+  <div class="howto">
+    <b>怎么换皮肤</b>
+    <ol>
+      <li>点下面的<b>「下载」</b>按钮，把 <code>.vrm</code> 文件存到电脑上</li>
+      <li>打开 <a href="https://world.myiuan.xin" style="color:#9db4ff">world.myiuan.xin</a>，等世界加载完</li>
+      <li>把这个 <code>.vrm</code> 文件<b>直接拖进画面</b></li>
+      <li>换好了。世界会记住你的皮肤，下次进来还是它</li>
+    </ol>
+  </div>
+
+  <h2>本地皮肤</h2>
+  <p class="sub">已经放在我们自己的服务器上，随时可下，不依赖外网</p>
+  <div class="grid" id="local"></div>
+
+  <h2>更多皮肤（网上）</h2>
+  <p class="sub">本地这十张不够玩的话，下面这些站有几百张免费 VRM</p>
+  <div class="weblist">
+    <div class="web">
+      <div class="k">🎭</div>
+      <div>
+        <div class="t">VTubeMe 免费 VRM（推荐）</div>
+        <div class="d">
+          有 300 张 CC0 公共领域皮肤（不用署名、可商用），怪物、机器人、食物、人物都有，多数 10MB 以内。
+          点进页面找到喜欢的，下载 <code>.vrm</code> 拖动进来即可。<br>
+          <a href="https://vtubeme.com/free-vrm-avatars" target="_blank" rel="noreferrer noopener">https://vtubeme.com/free-vrm-avatars</a>
+        </div>
+      </div>
+    </div>
+    <div class="web">
+      <div class="k">🌐</div>
+      <div>
+        <div class="t">Open Source Avatars</div>
+        <div class="d">官方文档推荐的皮肤库，收录多个开源合集。<br>
+          <a href="https://www.opensourceavatars.com/" target="_blank" rel="noreferrer noopener">https://www.opensourceavatars.com/</a>
+        </div>
+      </div>
+    </div>
+    <div class="web">
+      <div class="k">🎨</div>
+      <div>
+        <div class="t">VRoid Studio（自己捏一个）</div>
+        <div class="d">免费软件，可以捏一个独一无二的形象，导出成 <code>.vrm</code>。想给重要的人做一个专属皮肤用这个。<br>
+          <a href="https://vroid.com/en/studio" target="_blank" rel="noreferrer noopener">https://vroid.com/en/studio</a>
+        </div>
+      </div>
+    </div>
+    <div class="web">
+      <div class="k">🪐</div>
+      <div>
+        <div class="t">VIVERSE Avatar</div>
+        <div class="d">免费 VRM 下载，也有在线捏脸工具。<br>
+          <a href="https://avatar.viverse.com/avatar/what-is-vrm" target="_blank" rel="noreferrer noopener">https://avatar.viverse.com/avatar/what-is-vrm</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>皮肤文件来自 VTubeMe 与 Polygonal Mind「100 Avatars」系列</footer>
+</div>
+
+<script>
+// 皮肤清单。base 指向世界服务器，VRM 与预览图都放在那儿。
+const BASE = 'https://world.myiuan.xin/assets/'
+
+const SKINS = [
+  { file: 'cool-pawn',      zh: '酷棋子',     en: 'Cool Pawn',      ext: 'webp', size: '1.2 MB', lic: 'cc0', desc: '国际象棋棋子造型' },
+  { file: 'goat-ghost',     zh: '山羊幽灵',   en: 'Goat Ghost',     ext: 'webp', size: '1.6 MB', lic: 'cc0', desc: '飘忽的小幽灵' },
+  { file: 'cool-waffle',    zh: '华夫饼侠',   en: 'Cool Waffle',    ext: 'webp', size: '2.3 MB', lic: 'cc0', desc: '早餐系角色' },
+  { file: 'bad-bot',        zh: '坏脾气机器人', en: 'Bad Bot',      ext: 'webp', size: '2.7 MB', lic: 'cc0', desc: '方头方脑的机器人' },
+  { file: 'chester',        zh: '切斯特',     en: 'Chester',        ext: 'webp', size: '2.9 MB', lic: 'cc0', desc: '拟人角色' },
+  { file: 'kiba',           zh: '犬牙',       en: 'Kiba',           ext: 'webp', size: '3.6 MB', lic: 'cc0', desc: '犬系角色' },
+  { file: 'cool-spaguetti', zh: '意面侠',     en: 'Cool Spaguetti', ext: 'webp', size: '3.6 MB', lic: 'cc0', desc: '一盘会走路的意面' },
+  { file: 'nova',           zh: '诺娃',       en: 'Nova',           ext: 'png',  size: '1.5 MB', lic: 'by',  desc: '写实风 · 青绿毛衣' },
+  { file: 'kai',            zh: '凯',         en: 'Kai',            ext: 'png',  size: '2.0 MB', lic: 'by',  desc: '写实风 · 涂鸦 T 恤' },
+  { file: 'sky',            zh: '斯凯',       en: 'Sky',            ext: 'png',  size: '5.2 MB', lic: 'by',  desc: '写实风 · 紫色外套' },
+]
+
+const grid = document.getElementById('local')
+grid.innerHTML = SKINS.map(s => `
+  <div class="card">
+    <img class="shot" loading="lazy" alt="${s.zh}"
+         src="${BASE}preview-${s.file}.${s.ext}">
+    <div class="body">
+      <div class="name">${s.zh}</div>
+      <div class="en">${s.en}</div>
+      <div class="meta">
+        <span class="tag ${s.lic}">${s.lic === 'cc0' ? 'CC0 免署名' : '需署名'}</span>
+        <span class="tag">${s.size}</span>
+      </div>
+      <div class="desc">${s.desc}</div>
+      <a class="dl" href="${BASE}avatar-${s.file}.vrm" download>下载</a>
+    </div>
+  </div>
+`).join('')
+</script>
+</body>
+</html>

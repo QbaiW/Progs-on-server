@@ -48,6 +48,14 @@
     transition: transform .18s ease, box-shadow .18s ease;
   }
   a.enter:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(120,140,255,.4); }
+  a.skin {
+    display: block; margin: 12px auto 0; max-width: 200px;
+    padding: 10px 0; border-radius: 999px; text-align: center;
+    border: 1px solid rgba(150,180,255,.3); color: #b9c6f5;
+    text-decoration: none; font-size: 14px; letter-spacing: .05em;
+    transition: border-color .18s ease, color .18s ease;
+  }
+  a.skin:hover { border-color: rgba(150,180,255,.7); color: #fff; }
   .hint { margin-top: 22px; font-size: 12px; color: #6d7bad; }
 </style>
 </head>
@@ -57,6 +65,7 @@
   <h1>星空世界</h1>
   <p>点进去就能玩的 3D 联机世界。<br>朋友们可以一起走动、聊天、放模型。</p>
   <a class="enter" href="https://world.myiuan.xin">进入世界</a>
+  <a class="skin" href="/skin/index.html">✧ 挑一张皮肤</a>
   <div class="hint">建议用电脑打开，支持 WASD 移动</div>
 </main>
 </body>
