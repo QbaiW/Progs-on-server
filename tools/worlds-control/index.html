@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>世界控制台</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 20px 60px;
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    color: #e8ecf5;
+    background: radial-gradient(1200px 600px at 50% -10%, #1b2440 0%, #0b0e17 55%, #070910 100%);
+    min-height: 100vh;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: .04em; }
+  .sub { color: #8b95ab; font-size: 13px; margin-bottom: 22px; }
+
+  .mem {
+    display: flex; gap: 18px; flex-wrap: wrap;
+    background: #111827cc; border: 1px solid #ffffff14; border-radius: 12px;
+    padding: 12px 16px; margin-bottom: 22px; font-size: 13px; color: #a9b3c8;
+  }
+  .mem b { color: #e8ecf5; font-variant-numeric: tabular-nums; }
+  .mem .low b { color: #ff9d6b; }
+
+  .world {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    background: #131a2acc; border: 1px solid #ffffff12; border-radius: 14px;
+    padding: 16px 18px; margin-bottom: 12px;
+    transition: border-color .18s, background .18s;
+  }
+  .world:hover { border-color: #ffffff26; }
+  .world.on { border-color: #2e7d5b66; background: #12211acc; }
+
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: #4a5568; }
+  .dot.online { background: #34d399; box-shadow: 0 0 0 4px #34d3991f; }
+  .dot.stopped { background: #6b7280; }
+  .dot.errored { background: #f87171; box-shadow: 0 0 0 4px #f871711f; }
+  .dot.missing { background: #f59e0b; }
+
+  .info { flex: 1 1 240px; min-width: 0; }
+  .name { font-weight: 600; font-size: 16px; }
+  .meta { color: #8b95ab; font-size: 12.5px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .meta .tag { color: #cbd5e1; }
+
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  button, a.btn {
+    font: inherit; font-size: 13.5px; line-height: 1;
+    padding: 9px 15px; border-radius: 9px; cursor: pointer;
+    border: 1px solid #ffffff1f; background: #1c2536; color: #e8ecf5;
+    text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
+    transition: background .15s, border-color .15s, opacity .15s;
+  }
+  button:hover:not(:disabled), a.btn:hover { background: #253048; border-color: #ffffff33; }
+  button:disabled { opacity: .38; cursor: not-allowed; }
+  button.go { background: #1d4ed8; border-color: #2563eb; }
+  button.go:hover:not(:disabled) { background: #2563eb; }
+  button.stop { background: #7f1d1d40; border-color: #f8717155; color: #fca5a5; }
+  button.stop:hover:not(:disabled) { background: #7f1d1d66; }
+
+  .msg { margin-top: 18px; padding: 12px 16px; border-radius: 10px; font-size: 13.5px; display: none; white-space: pre-wrap; }
+  .msg.show { display: block; }
+  .msg.err { background: #7f1d1d33; border: 1px solid #f8717155; color: #fca5a5; }
+  .msg.ok  { background: #14532d40; border: 1px solid #34d39955; color: #6ee7b7; }
+
+  .empty { color: #8b95ab; padding: 30px 0; text-align: center; }
+  .foot { margin-top: 26px; color: #64708a; font-size: 12.5px; line-height: 1.9; }
+  code { background: #ffffff10; padding: 1px 6px; border-radius: 5px; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>世界控制台</h1>
+  <div class="sub">想开哪个开哪个，想关哪个关哪个。多个世界可以同时开着。</div>
+
+  <div class="mem" id="mem">正在读取…</div>
+  <div id="list"></div>
+  <div class="msg" id="msg"></div>
+
+  <div class="foot">
+    启动前会先看内存，不够就拒绝 —— 这台机器只有 1870MB。<br>
+    关掉世界不会丢数据，下次开还是原样。
+  </div>
+</div>
+
+<script>
+const $list = document.getElementById('list')
+const $mem  = document.getElementById('mem')
+const $msg  = document.getElementById('msg')
+
+let busy = false
+
+function say(text, kind) {
+  $msg.textContent = text
+  $msg.className = 'msg show ' + (kind === 'ok' ? 'ok' : 'err')
+  if (kind === 'ok') setTimeout(() => { $msg.className = 'msg' }, 4000)
+}
+
+function human(ms) {
+  if (!ms) return ''
+  const s = Math.floor(ms / 1000)
+  if (s < 60) return s + ' 秒'
+  if (s < 3600) return Math.floor(s / 60) + ' 分钟'
+  if (s < 86400) return Math.floor(s / 3600) + ' 小时'
+  return Math.floor(s / 86400) + ' 天'
+}
+
+const DOT = { online: 'on', stopped: 'stopped', errored: 'errored', 'not-created': 'missing' }
+const LABEL = { online: '运行中', stopped: '已关闭', errored: '报错了', 'not-created': '还没建' }
+
+function render(data) {
+  const { memory } = data
+  const low = memory.available < data.minFreeMb
+  $mem.className = 'mem' + (low ? ' low' : '')
+  $mem.innerHTML =
+    '内存 <b>' + memory.available + ' MB</b> 可用 / 共 <b>' + memory.total + ' MB</b>' +
+    '　·　每开一个世界约需 <b>' + data.perWorldMb + ' MB</b>' +
+    '　·　安全线 <b>' + data.minFreeMb + ' MB</b>'
+
+  if (!data.worlds.length) {
+    $list.innerHTML = '<div class="empty">worlds.json 里还没有世界</div>'
+    return
+  }
+
+  $list.innerHTML = data.worlds.map(w => {
+    const on = w.status === 'online'
+    const meta = [
+      '端口 ' + w.port,
+      w.managed ? (LABEL[w.status] || w.status) : '没有对应的进程',
+      on && w.rssMb ? '占用 ' + w.rssMb + ' MB' : '',
+      on && w.uptimeMs ? '已开 ' + human(w.uptimeMs) : '',
+    ].filter(Boolean).join('　·　')
+
+    return '<div class="world' + (on ? ' on' : '') + '">' +
+      '<span class="dot ' + (DOT[w.status] || '') + '"></span>' +
+      '<div class="info">' +
+        '<div class="name">' + esc(w.label || w.name) + '</div>' +
+        '<div class="meta">' + esc(meta) + '</div>' +
+      '</div>' +
+      '<div class="actions">' +
+        (on
+          ? '<a class="btn" href="' + esc(w.url) + '" target="_blank" rel="noopener">进入 →</a>' +
+            '<button class="stop" data-act="stop" data-name="' + esc(w.name) + '">关闭</button>'
+          : '<button class="go" data-act="start" data-name="' + esc(w.name) + '">启动</button>') +
+      '</div>' +
+    '</div>'
+  }).join('')
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+}
+
+async function refresh() {
+  if (busy) return
+  try {
+    const r = await fetch('api/worlds', { cache: 'no-store' })
+    render(await r.json())
+  } catch (e) {
+    $list.innerHTML = '<div class="empty">读不到状态：' + esc(e.message) + '</div>'
+  }
+}
+
+$list.addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('button[data-act]')
+  if (!btn || busy) return
+  const { act, name } = btn.dataset
+  busy = true
+  btn.disabled = true
+  btn.textContent = act === 'start' ? '正在启动…' : '正在关闭…'
+  try {
+    const r = await fetch('api/worlds/' + encodeURIComponent(name) + '/' + act, { method: 'POST' })
+    const j = await r.json()
+    if (!r.ok) say(j.error || '操作失败', 'err')
+    else say((act === 'start' ? '已经启动：' : '已经关闭：') + name, 'ok')
+  } catch (e) {
+    say('操作失败：' + e.message, 'err')
+  } finally {
+    busy = false
+    setTimeout(refresh, 900)
+  }
+})
+
+refresh()
+setInterval(refresh, 5000)
+</script>
+</body>
+</html>
