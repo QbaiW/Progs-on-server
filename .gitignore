@@ -7,3 +7,7 @@
 
 # Local working/design outputs (e.g. image-generation sources) stay out of Git.
 /output/
+
+# GLB build outputs ¡ª regenerate with tools/make-*.mjs instead of committing.
+/tools/_*.glb
+
