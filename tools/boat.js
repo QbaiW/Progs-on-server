@@ -1,83 +1,238 @@
-// 小船：固定吃水线 + 随波浮动（不做物理模拟）。
+// ============================================================================
+//  小船脚本 v2：上下浮动（摇摆） + 缆绳拖动
 //
-// 为什么这个脚本里一行联机同步代码都没有：
-//   · world.getTime() 是**服务端时钟**（ClientNetwork 用 serverTimeOffset 校正，
-//     见 core/systems/ClientNetwork.js:84），所以每个客户端算出来的 t 完全一样；
-//   · 服务端和每个客户端都跑这段脚本，同一个 t → 同一个姿态；
-//   · 运动学刚体由本地 PhysX 解算，姿态再被引擎回读进节点
-//     （Physics.postFixedUpdate/preUpdate → RigidBody.onInterpolate），
-//     所以甲板会跟着动、站在上面的人由 PlayerLocal 的移动平台逻辑带着走。
-//   结论：只要输入是「共享时钟 + 固定锚点」，就天然一致，不需要发消息。
-//
-// ⚠️ 脚本体是 core/systems/Scripts.js:83 的
-//      `(world, app, fetch, props, setTimeout) => { ... }`
-//    所以 props / world / app / fetch / setTimeout 都是**函数参数**，
-//    千万别再写 `const props = ...`（SyntaxError: already been declared）。
-//
-// GLB 节点（tools/make-boat.mjs 生成）：
-//   Boat      —— rigidbody(type=kinematic)，脚本里就是 app.get('Boat')
-//   BoatBody  —— collider（单 primitive、无材质）
-//   BoatVisual—— 视觉（3 个材质：Hull / Trim / Tar）
-// 本地坐标：y = 0 是水线，+Z 船头，+X 右舷。实体摆在 y=0 就是水线高度。
+//  设计依据（全部在服务器源码里逐条核对过，不是猜的）：
+//   · 脚本在服务端和每个客户端**都会跑**同一份代码（Scripts.js 的沙箱，
+//     注入的全局只有 Math/Date.now/URL/console/Vector3/Quaternion/Euler/Matrix4/
+//     Curve/prng/clamp/num/uuid/DEG2RAD/RAD2DEG 这些，没有 document/window）。
+//   · app.on('update') 对每个已构建实体每帧触发（Entities.js:85/91）。
+//   · 运动学刚体由 setKinematicTarget(pos, quat) 驱动（RigidBody.js:433），
+//     physics 的 preUpdate 会把 actor 位姿插值回节点 position（RigidBody.js:132），
+//     而 position 是带 _onChange 钩子的（Node.js:86）→ 会标脏并更新 matrixWorld
+//     → 视觉真的会动，挂在它下面的 action 也会跟着动。
+//   · 节点 id 会被引擎去重加后缀（Boat → Boat_1），所以只能用「能力」找刚体。
+//   · 交互按钮 action 只在**按 E 的那个客户端**触发，回传 { playerId }
+//     （ClientActions.js:update 里 node._onTrigger(...)）。
+//   · 客户端 app.send(name,data) 只能发给服务端；服务端 app.send 广播给所有客户端
+//     （Apps.js:284-305）。服务端由 onEntityEvent → entity.onEvent → emit(name,data,socket.id)
+//     收到，所以服务端 app.on(name, (data, networkId)) 的第二个参数就是发送者的玩家 id
+//     （ServerNetwork.js:493 + Socket({id:user.id})）。
+//   · 于是：拖动这件事只在「谁握着绳」这一个离散状态上需要同步；握手之后，
+//     每一端各自用 world.getPlayer(id).position 算同样的目标位姿 —— 零每帧流量。
+//   · 海底深度用 world.raycast 量（水面没有碰撞体，射线会直接穿过水面打到地形），
+//     所以「拖不上岸」是量出来的，不是拍一个圈硬限制的。
+// ============================================================================
 
 app.configure([
-  { key: 'motion', type: 'toggle', label: '随波浮动', initial: true },
-  { key: 'amount', type: 'number', label: '起伏高度（米）', initial: 0.035, min: 0, max: 0.2, step: 0.005 },
-  { key: 'roll', type: 'number', label: '横摇（度）', initial: 1.2, min: 0, max: 8, step: 0.1 },
-  { key: 'pitch', type: 'number', label: '纵摇（度）', initial: 0.9, min: 0, max: 8, step: 0.1 },
+  { key: 'motion', type: 'toggle', initial: true, hint: '上下浮动 / 摇摆' },
+  { key: 'amount', type: 'number', initial: 0.035, min: 0, max: 0.2, step: 0.005, hint: '浮动幅度（米）' },
+  { key: 'roll', type: 'number', initial: 1.2, min: 0, max: 8, step: 0.1, hint: '横摇（度）' },
+  { key: 'pitch', type: 'number', initial: 0.9, min: 0, max: 8, step: 0.1, hint: '纵摇（度）' },
+  { key: 'tow', type: 'toggle', initial: true, hint: '允许用缆绳拖船' },
+  { key: 'rope', type: 'number', initial: 3.2, min: 1.5, max: 8, step: 0.1, hint: '缆绳长度（米）' },
+  { key: 'speed', type: 'number', initial: 1.6, min: 0.2, max: 4, step: 0.1, hint: '被拖速度（米/秒）' },
+  { key: 'turn', type: 'number', initial: 1.5, min: 0.2, max: 6, step: 0.1, hint: '船头转向速度（弧度/秒）' },
+  { key: 'depth', type: 'number', initial: 0.55, min: 0.3, max: 2, step: 0.05, hint: '最小水深（米），浅于此不再往前拖' },
 ])
 
-const MOTION = props.motion !== false
-const AMOUNT = typeof props.amount === 'number' ? props.amount : 0.035
-const ROLL = ((typeof props.roll === 'number' ? props.roll : 1.2) * Math.PI) / 180
-const PITCH = ((typeof props.pitch === 'number' ? props.pitch : 0.9) * Math.PI) / 180
+const F = (v, d) => {
+  const n = Number(v)
+  return v === undefined || v === null || n !== n ? d : n
+}
 
-// 找那个运动学刚体节点。
-// 注意：**别用 app.get('Boat')** —— 引擎给节点发 id 时会去重加后缀，
-// 诊断实测 GLB 里的节点名 `Boat` 到运行时变成了 id `Boat_1`
-// （三个 mesh primitive 也从 BoatVisual 变成 BoatVisual_1/_2/_3），
-// 所以按名字查会扑空。改成按能力查：RigidBody 的代理才有 setKinematicTarget。
+const MOTION = props.motion !== false
+const AMOUNT = F(props.amount, 0.035)
+const ROLL = F(props.roll, 1.2) * DEG2RAD
+const PITCH = F(props.pitch, 0.9) * DEG2RAD
+const TOW = props.tow !== false
+const ROPE = F(props.rope, 3.2)
+const SPEED = F(props.speed, 1.6)
+const TURN = F(props.turn, 1.5)
+const MIN_DEPTH = F(props.depth, 0.55)
+const isServer = !!world.isServer
+
+// ---------------------------------------------------------------- 1. 找到刚体
+// 不能按名字找：GLB 里的节点名到运行时会被去重加后缀（Boat → Boat_1）。
 let body = null
-app.traverse(n => {
-  if (!body && typeof n.setKinematicTarget === 'function') body = n
+app.traverse(node => {
+  if (!body && typeof node.setKinematicTarget === 'function') body = node
 })
 if (!body) {
-  console.error('[boat] 没找到运动学刚体节点（traverse 里没有任何节点带 setKinematicTarget）')
+  console.error('[boat] 没找到运动学刚体（GLB 里需要一个 extras.node=rigidbody 且 type=kinematic 的节点）')
+  return
+}
+if (body.type !== 'kinematic') {
+  console.error('[boat] 刚体 type=' + body.type + '，必须是 kinematic 才能这样开船')
   return
 }
 
-// 锚点：读刚体 actor 当前的**世界**位姿。
-// App.build 的顺序是 root.activate() 在前（:133，此时 mount() 已建好 actor）、
-// script.exec 在后（:142），所以这里读到的就是实体在世界里被摆好的那个位置。
-// （RigidBody.getPosition 在没 actor 时是 return vec3.set(0,0,0)，不会抛。）
+// ---------------------------------------------------------------- 2. 泊位
 const anchorPos = new Vector3()
 const anchorQuat = new Quaternion()
 body.getPosition(anchorPos)
 body.getQuaternion(anchorQuat)
+const _e0 = new Euler(0, 0, 0, 'YXZ')
+_e0.setFromQuaternion(anchorQuat, 'YXZ')
+const rest = { x: anchorPos.x, z: anchorPos.z, yaw: _e0.y }
 
-console.log(
-  `[boat] 刚体 id=${body.id}，锚点 (${anchorPos.x.toFixed(2)}, ${anchorPos.y.toFixed(2)}, ${anchorPos.z.toFixed(2)})，` +
-    `浮动 ${MOTION ? AMOUNT + ' 米' : '关'}`
-)
+// ---------------------------------------------------------------- 3. 缆绳状态
+let ropeBy = app.state && app.state.ropeBy ? app.state.ropeBy : null
+const me = world.getPlayer()
+const myId = me ? me.id : null
 
-const _pos = new Vector3()
-const _quat = new Quaternion()
-const _rot = new Quaternion()
-const _euler = new Euler()
-
-function computePose(t) {
-  // 两个不共频正弦叠加：周期 ≈ 5.5s 与 3.3s，肉眼看着不规律，但算得出来
-  const y = AMOUNT * (0.62 * Math.sin(t * 1.15) + 0.38 * Math.sin(t * 1.93 + 1.7))
-  const roll = ROLL * Math.sin(t * 1.31 + 0.4)
-  const pitch = PITCH * Math.sin(t * 1.71 + 2.1)
-  _pos.set(anchorPos.x, anchorPos.y + y, anchorPos.z)
-  _euler.set(pitch, 0, roll, 'XYZ')
-  _rot.setFromEuler(_euler)
-  _quat.copy(anchorQuat).multiply(_rot)
+// ---------------------------------------------------------------- 4. 交互按钮
+const action = app.create('action')
+action.label = '抓住缆绳'
+action.distance = 4.5
+action.position.set(0, 0.55, 0)
+body.add(action)
+action.onTrigger = event => {
+  if (!TOW) return
+  const id = event && event.playerId ? event.playerId : myId
+  if (!id) return
+  app.send('rope', { hold: ropeBy === id ? 'release' : 'grab' })
 }
 
+function applyRope(by) {
+  ropeBy = by || null
+  action.label = ropeBy && myId && ropeBy === myId ? '松开缆绳' : '抓住缆绳'
+}
+applyRope(ropeBy)
+
+console.log(
+  '[boat] 刚体 id=' + body.id + '，泊位 (' + rest.x.toFixed(2) + ', ' + anchorPos.y.toFixed(2) + ', ' + rest.z.toFixed(2) + ')' +
+  '，朝向 ' + (rest.yaw * RAD2DEG).toFixed(1) + '°，绳长 ' + ROPE + ' 米' +
+  (isServer ? '，服务端' : '，客户端 id=' + myId)
+)
+
+// ---------------------------------------------------------------- 5. 收发
+if (isServer) {
+  // 客户端发来的 grab/release：networkId 就是发送者的玩家 id（Socket.id = user.id）
+  app.on('rope', (data, networkId) => {
+    if (!TOW) return
+    const by = networkId || null
+    if (!by) return
+    const hold = data && data.hold
+    if (hold === 'grab') {
+      ropeBy = by
+    } else if (hold === 'release') {
+      if (ropeBy !== by) return
+      ropeBy = null
+    } else {
+      return
+    }
+    if (app.state) app.state.ropeBy = ropeBy
+    applyRope(ropeBy)
+    app.send('rope', { by: ropeBy })
+    console.log('[boat] 缆绳 ' + (ropeBy ? '交给 ' + by : '松开'))
+  })
+  // 客户端脚本启动时自报家门：验的是「客户端能创建 action、找得到刚体、发得出消息」
+  app.on('hello', (data, networkId) => {
+    console.log('[boat] 客户端就绪 id=' + networkId + ' ' + JSON.stringify(data))
+  })
+} else {
+  app.on('rope', data => {
+    applyRope(data ? data.by : null)
+    console.log('[boat] 缆绳状态：' + (ropeBy || '空闲'))
+  })
+  // 半路进来的客户端：状态在 app.state 里（实体数据随快照下发）
+  app.send('hello', {
+    body: body.id,
+    action: action.label,
+    myId: myId,
+    rope: ropeBy,
+  })
+}
+
+// ---------------------------------------------------------------- 6. 每帧
+const _pos = new Vector3()
+const _quat = new Quaternion()
+const _e = new Euler(0, 0, 0, 'YXZ')
+const _down = new Vector3(0, -1, 0)
+const _probe = new Vector3()
+const mask = TOW ? world.createLayerMask('environment') : 0
+let lastTime = 0
+let loggedAt = 0
+
 app.on('update', () => {
-  if (!MOTION) return
-  computePose(world.getTime())
+  const now = world.getTime()
+  const dt = lastTime && now > lastTime ? Math.min(now - lastTime, 0.1) : 0
+  lastTime = now
+
+  let dist = null
+  if (TOW && ropeBy) {
+    const p = world.getPlayer(ropeBy)
+    if (!p) {
+      // 拉绳的人下线/离开了
+      if (isServer) {
+        ropeBy = null
+        if (app.state) app.state.ropeBy = null
+        applyRope(null)
+        app.send('rope', { by: null })
+        console.log('[boat] 拉绳的人不在了，自动松开')
+      }
+    } else {
+      const tp = p.position // 注意：这是复用的对象，读完立刻用掉
+      const dx = tp.x - rest.x
+      const dz = tp.z - rest.z
+      dist = Math.sqrt(dx * dx + dz * dz)
+      if (dist > ROPE * 3) {
+        if (isServer) {
+          ropeBy = null
+          if (app.state) app.state.ropeBy = null
+          applyRope(null)
+          app.send('rope', { by: null })
+          console.log('[boat] 缆绳拉太远（' + dist.toFixed(1) + ' 米），自动松开')
+        }
+      } else if (dist > 0.001) {
+        const ux = dx / dist
+        const uz = dz / dist
+        // 绳绷直了才被拉动：距离超过绳长多少，就往那个方向挪多少（不冲过头）
+        const slack = dist - ROPE
+        if (slack > 0.05 && dt > 0) {
+          const step = Math.min(slack, SPEED * dt)
+          const nx = rest.x + ux * step
+          const nz = rest.z + uz * step
+          if (deepEnough(nx, nz, ux, uz)) {
+            rest.x = nx
+            rest.z = nz
+          }
+        }
+        // 船头逐渐转向拉绳的人（本地 +Z 是船头）
+        const want = Math.atan2(ux, uz)
+        let diff = want - rest.yaw
+        while (diff > Math.PI) diff -= Math.PI * 2
+        while (diff < -Math.PI) diff += Math.PI * 2
+        const maxTurn = TURN * dt
+        if (diff > maxTurn) diff = maxTurn
+        else if (diff < -maxTurn) diff = -maxTurn
+        rest.yaw += diff
+        if (isServer && now - loggedAt > 5) {
+          loggedAt = now
+          console.log(
+            '[boat] 拖拽中：离 ' + dist.toFixed(2) + ' 米，船位 (' + rest.x.toFixed(2) + ', ' + rest.z.toFixed(2) + ')' +
+            '，朝向 ' + (rest.yaw * RAD2DEG).toFixed(1) + '°'
+          )
+        }
+      }
+    }
+  }
+
+  const bob = MOTION ? AMOUNT * (0.62 * Math.sin(now * 1.15) + 0.38 * Math.sin(now * 1.93 + 1.7)) : 0
+  const roll = MOTION ? ROLL * Math.sin(now * 1.31 + 0.4) : 0
+  const pitch = MOTION ? PITCH * Math.sin(now * 1.71 + 2.1) : 0
+  _pos.set(rest.x, anchorPos.y + bob, rest.z)
+  _e.set(pitch, rest.yaw, roll, 'YXZ')
+  _quat.setFromEuler(_e)
   body.setKinematicTarget(_pos, _quat)
 })
+
+// 前方 3 米处不够深就不让走（船体最长 2.2 米，3 米处一定在船体投影之外，
+// 不会打到自己的碰撞体；水面没有碰撞体，射线会穿过它打到海底）。
+function deepEnough(x, z, ux, uz) {
+  if (!mask) return true
+  _probe.set(x + ux * 3, 5, z + uz * 3)
+  const hit = world.raycast(_probe, _down, 20, mask)
+  if (!hit) return true // 打不到底 = 很深
+  return hit.point.y <= -MIN_DEPTH
+}
