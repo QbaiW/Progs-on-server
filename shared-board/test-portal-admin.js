@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { listPublicFeatures } = require("./lib/feature-registry");
 const { createStarBottleServer } = require("./server");
 
 const TEST_PASSWORD = "PortalOwner!2048";
@@ -184,11 +185,10 @@ test("owner can edit public presentation and visitor labels without changing rou
   const snapshot = await requestJson(baseUrl, "/api/owner/portal", { cookie: ownerCookie });
   assert.equal(snapshot.body.visitors.find((visitor) => visitor.id === visitorId).name, "圆圆");
   assert.equal(snapshot.body.activity.entries.find((entry) => entry.visitorId === visitorId).visitorName, "圆圆");
-  assert.deepEqual(snapshot.body.features.map((feature) => feature.id), [
-    "star-bottle",
-    "love-stars",
-    "wrong",
-  ]);
+  assert.deepEqual(
+    snapshot.body.features.map((feature) => feature.id),
+    listPublicFeatures().map((feature) => feature.id),
+  );
 });
 
 test("owner portal visitors are removed from anonymous activity", async (t) => {

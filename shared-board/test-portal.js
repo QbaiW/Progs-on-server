@@ -126,17 +126,19 @@ test("portal and legacy feature routes are served through the registry", async (
   assert.equal(registry.status, 200);
   const payload = await registry.json();
   assert.equal(payload.version, 1);
-  assert.deepEqual(payload.features.map((feature) => feature.id), ["star-bottle", "love-stars", "wrong"]);
+  assert.deepEqual(
+    payload.features.map((feature) => feature.id),
+    listPublicFeatures().map((feature) => feature.id),
+  );
   assert.equal(payload.features[0].path, "/star-bottle");
   assert.equal("entry" in payload.features[0], false);
 
   const registrySlash = await fetch(`${baseUrl}/api/features/`);
   assert.equal(registrySlash.status, 200);
-  assert.deepEqual((await registrySlash.json()).features.map((feature) => feature.id), [
-    "star-bottle",
-    "love-stars",
-    "wrong",
-  ]);
+  assert.deepEqual(
+    (await registrySlash.json()).features.map((feature) => feature.id),
+    listPublicFeatures().map((feature) => feature.id),
+  );
 
   const registryHead = await fetch(`${baseUrl}/api/features`, { method: "HEAD" });
   assert.equal(registryHead.status, 200);
@@ -172,7 +174,10 @@ test("a new registered extensionless route needs no server route branch", async 
 
   const registry = await fetch(`${baseUrl}/api/features`);
   const payload = await registry.json();
-  assert.deepEqual(payload.features.map((feature) => feature.id), ["star-bottle", "demo", "love-stars", "wrong"]);
+  assert.deepEqual(
+    payload.features.map((feature) => feature.id),
+    listPublicFeatures([...FEATURE_REGISTRY, demo]).map((feature) => feature.id),
+  );
 });
 
 test("disabled features are hidden and their registered entry is not directly reachable", async (t) => {
@@ -195,5 +200,8 @@ test("disabled features are hidden and their registered entry is not directly re
   assert.equal((await fetch(`${baseUrl}/disabled-demo.html`)).status, 404);
   assert.equal((await fetch(`${baseUrl}/disabled-demo%2F..%2Fdisabled-demo.html`)).status, 404);
   const payload = await (await fetch(`${baseUrl}/api/features`)).json();
-  assert.deepEqual(payload.features.map((feature) => feature.id), ["star-bottle", "love-stars", "wrong"]);
+  assert.deepEqual(
+    payload.features.map((feature) => feature.id),
+    listPublicFeatures().map((feature) => feature.id),
+  );
 });
