@@ -91,7 +91,7 @@ bash shared-board/deploy-server.sh
 
 - 宝塔软件商店通过“Node.js 版本管理器”安装 Node.js 20 或 22，再安装 PM2。
 - 在 `shared-board` 目录执行：`npm install --omit=dev --package-lock=false`，以及 `npm install -g pm2`。
-- 新建 `shared-board/.env`，设置 `NODE_ENV`、`HOST=127.0.0.1`、`PORT=8787`、`BOARD_DATA_DIR=/www/wwwroot/qe-star-bottle/data`、`OWNER_USERNAME=QbaiW`、`OWNER_PASSWORD`、`SITE_USERNAME=Yuna`、`SITE_PASSWORD`、`SESSION_HOURS=12`。请使用长随机密码，不要用简单数字密码。管理员用 `OWNER_USERNAME` + `OWNER_PASSWORD` 登录（权限含用户级全部功能 + 管理后台），用户用 `SITE_USERNAME` + `SITE_PASSWORD` 登录（只有页面和功能）。账号名如果改成了别的，记得同步改 `data/settings.json`：该文件里的账号密码优先于 `.env`。
+- 新建 `shared-board/.env`，设置 `NODE_ENV`、`HOST=127.0.0.1`、`PORT=8787`、`BOARD_DATA_DIR=/var/lib/qe-star-bottle/data`、`OWNER_USERNAME=QbaiW`、`OWNER_PASSWORD`、`SITE_USERNAME=Yuna`、`SITE_PASSWORD`、`SESSION_HOURS=12`。请使用长随机密码，不要用简单数字密码。管理员用 `OWNER_USERNAME` + `OWNER_PASSWORD` 登录（权限含用户级全部功能 + 管理后台），用户用 `SITE_USERNAME` + `SITE_PASSWORD` 登录（只有页面和功能）。账号名如果改成了别的，记得同步改 `data/settings.json`：该文件里的账号密码优先于 `.env`。
 - 执行 `pm2 start ecosystem.config.cjs`、`pm2 save`、`pm2 startup`（复制并执行其打印的命令），再 `pm2 save` 并检查 `curl http://127.0.0.1:8787/api/health`。
 
 ### 域名与 HTTPS

@@ -35,7 +35,7 @@ npm install -g pm2
 NODE_ENV=production
 HOST=127.0.0.1
 PORT=8787
-BOARD_DATA_DIR=/www/wwwroot/qe-star-bottle/data
+BOARD_DATA_DIR=/var/lib/qe-star-bottle/data
 OWNER_USERNAME=QbaiW
 OWNER_PASSWORD=replace-with-a-long-random-password
 SITE_USERNAME=Yuna
