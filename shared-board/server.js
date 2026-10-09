@@ -1060,19 +1060,18 @@ function readSettings(settingsFile, passwordOverride, authOptions = {}) {
   if (typeof ownerPassword !== "string" || ownerPassword.length < 6) {
     throw new Error("Set OWNER_PASSWORD or provide data/settings.json with an ownerPassword of at least 6 characters");
   }
-  // Site access is deliberately separate from the owner/editor session. It
-  // defaults to the existing owner password so an installation gets the new
-  // gate without a data migration, while allowing a distinct credential in
-  // production through SITE_USERNAME/SITE_PASSWORD.
+  // Two levels share one login page but keep separate accounts: 用户级 (site)
+  // browses and uses features, 管理员级 (owner) additionally opens the admin
+  // panel. Their passwords default to the same value so a fresh install needs
+  // only one secret; SITE_USERNAME/SITE_PASSWORD and its OWNER_* twins override.
   const siteUsername = authOptions.siteUsername || authOptions.username ||
-    raw.siteUsername || process.env.SITE_USERNAME || "QbaiW";
+    raw.siteUsername || process.env.SITE_USERNAME || "Yuna";
   const sitePassword = authOptions.sitePassword || authOptions.password ||
     raw.sitePassword || process.env.SITE_PASSWORD || ownerPassword;
-  // The owner/editor login uses its own account (username + password), separate
-  // from the visitor/site credential. Stored values win over the environment so
-  // a change made in the admin panel survives a restart.
+  // Stored values win over the environment so a change made in the admin panel
+  // survives a restart.
   const ownerUsername = authOptions.ownerUsername ||
-    raw.ownerUsername || process.env.OWNER_USERNAME || siteUsername;
+    raw.ownerUsername || process.env.OWNER_USERNAME || "QbaiW";
   if (typeof ownerUsername !== "string" || ownerUsername.length < 1 || ownerUsername.length > 128) {
     throw new Error("OWNER_USERNAME must contain 1 to 128 characters");
   }
@@ -1224,9 +1223,9 @@ function createStarBottleServer(options = {}) {
   }
 
   function hasSiteAccess(request) {
-    // Keep the public site credential separate from the owner/editor session.
-    // Knowing the owner password alone must not bypass the account prompt.
-    return Boolean(siteSessionFor(request));
+    // 管理员级 = 用户级的全部权限 + 管理面，所以 owner 会话同样算已登录站点。
+    // 反过来不成立：site 会话不能进 /api/owner/*。
+    return Boolean(siteSessionFor(request) || sessionFor(request));
   }
 
   function isSiteAuthEndpoint(pathname) {
@@ -1875,9 +1874,15 @@ function createStarBottleServer(options = {}) {
           siteSessions.delete(session.token);
           closeSiteEventClients(session.token);
         }
+        // 退出登录也要退出管理身份，否则 owner 会话仍然能访问站点。
+        const ownerSession = sessionFor(request);
+        if (ownerSession) sessions.delete(ownerSession.token);
         writeJson(response, 200, { authenticated: false }, {
           Allow: "POST, OPTIONS",
-          "Set-Cookie": siteSessionCookie("", request, 0),
+          "Set-Cookie": [
+            siteSessionCookie("", request, 0),
+            sessionCookie("", request, 0),
+          ],
         });
         return true;
       }
@@ -1898,12 +1903,14 @@ function createStarBottleServer(options = {}) {
               ? body.account
               : "";
           const submittedPassword = typeof body.password === "string" ? body.password : "";
-          // Evaluate both comparisons before branching so a bad username does
+          // Evaluate all four comparisons before branching so a bad username does
           // not skip the password comparison and create an avoidable timing
           // distinction.
-          const usernameMatches = safeEqual(submittedUsername, settings.siteUsername);
-          const passwordMatches = safeEqual(submittedPassword, settings.sitePassword);
-          if (!usernameMatches || !passwordMatches) {
+          const siteMatches = safeEqual(submittedUsername, settings.siteUsername) &&
+            safeEqual(submittedPassword, settings.sitePassword);
+          const ownerMatches = safeEqual(submittedUsername, settings.ownerUsername) &&
+            safeEqual(submittedPassword, settings.ownerPassword);
+          if (!siteMatches && !ownerMatches) {
             recordFailedLogin(request, siteLoginAttempts);
             writeJson(response, 401, {
               authenticated: false,
@@ -1918,12 +1925,20 @@ function createStarBottleServer(options = {}) {
           const sessionSeconds = settings.sessionHours * 60 * 60;
           const expiresAt = Date.now() + sessionSeconds * 1000;
           siteSessions.set(token, { expiresAt });
+          const cookies = [siteSessionCookie(token, request, sessionSeconds)];
+          // 管理员从这一个登录页进来时顺手把管理会话也建好，省得再走一次入口。
+          if (ownerMatches) {
+            const ownerToken = crypto.randomBytes(32).toString("base64url");
+            sessions.set(ownerToken, { expiresAt });
+            cookies.push(sessionCookie(ownerToken, request, sessionSeconds));
+          }
           writeJson(response, 200, {
             authenticated: true,
+            owner: ownerMatches,
             expiresAt: new Date(expiresAt).toISOString(),
           }, {
             Allow: "POST, OPTIONS",
-            "Set-Cookie": siteSessionCookie(token, request, sessionSeconds),
+            "Set-Cookie": cookies,
           });
         } catch (error) {
           writeJson(response, error.statusCode || 400, {
@@ -2576,7 +2591,8 @@ function createStarBottleServer(options = {}) {
 
     if (pathname === "/api/events" && request.method === "GET") {
       const siteSession = siteAuthEnabled ? siteSessionFor(request) : null;
-      if (siteAuthEnabled && !siteSession) {
+      const ownerSession = siteAuthEnabled ? sessionFor(request) : null;
+      if (siteAuthEnabled && !siteSession && !ownerSession) {
         writeSiteAuthRequired(request, response, pathname);
         return true;
       }
@@ -2590,7 +2606,11 @@ function createStarBottleServer(options = {}) {
         "X-Content-Type-Options": "nosniff",
       });
       response.write(": connected\n\n");
-      eventClients.set(clientId, { response, siteToken: siteSession?.token || null });
+      eventClients.set(clientId, {
+        response,
+        siteToken: siteSession?.token || null,
+        ownerToken: ownerSession?.token || null,
+      });
       sendEvent(response, "notes", notesDocument);
       sendEvent(response, "favorites", favoritesDocument);
       request.on("close", () => eventClients.delete(clientId));
@@ -3361,7 +3381,10 @@ function createStarBottleServer(options = {}) {
       if (session.expiresAt <= now) siteSessions.delete(token);
     }
     for (const [clientId, client] of eventClients) {
-      if (siteAuthEnabled && (!client.siteToken || !siteSessions.has(client.siteToken))) {
+      // 和 hasSiteAccess 保持一致：任一身份还活着就继续推流。
+      const siteAlive = Boolean(client.siteToken) && siteSessions.has(client.siteToken);
+      const ownerAlive = Boolean(client.ownerToken) && sessions.has(client.ownerToken);
+      if (siteAuthEnabled && !siteAlive && !ownerAlive) {
         closeEventClient(clientId, client);
         continue;
       }

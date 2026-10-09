@@ -36,13 +36,14 @@ NODE_ENV=production
 HOST=127.0.0.1
 PORT=8787
 BOARD_DATA_DIR=/www/wwwroot/qe-star-bottle/data
+OWNER_USERNAME=QbaiW
 OWNER_PASSWORD=replace-with-a-long-random-password
-SITE_USERNAME=QbaiW
+SITE_USERNAME=Yuna
 SITE_PASSWORD=replace-with-a-long-random-password
 SESSION_HOURS=12
 ```
 
-`.env` 已加入 `.gitignore`，不要把真实密码提交到 Git 或发到聊天里。`SITE_USERNAME` 与 `SITE_PASSWORD` 是进入网站页面的账号密码；`OWNER_PASSWORD` 仍用于站长编辑后台。设置了这些环境变量后，生产环境不依赖 `data/settings.json` 中的密码；已有的设置文件仍可继续保留。
+`.env` 已加入 `.gitignore`，不要把真实密码提交到 Git 或发到聊天里。`SITE_USERNAME` + `SITE_PASSWORD` 是用户级账号（日常使用，能打开全部页面和功能）；`OWNER_USERNAME` + `OWNER_PASSWORD` 是管理员级账号，权限上包含用户级的全部功能，另外还能打开 /home 里的管理后台。两套账号在同一个登录页输入，管理员账号登录后会顺手建立管理会话，页面右上角会出现「管理后台」入口；原站长入口（功能中心连点 4 次）仍然可用。`data/settings.json` 里的账号优先于环境变量，改名后可同步修改该文件。
 
 ## 4. 启动并设置自动重启
 

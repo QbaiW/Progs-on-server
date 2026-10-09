@@ -12,6 +12,7 @@ const elements = {
   announcement: document.querySelector("#portalAnnouncement"),
   announcementText: document.querySelector("#announcementText"),
   ownerTrigger: document.querySelector("#ownerTrigger"),
+  ownerEntry: document.querySelector("#ownerEntry"),
   loginDialog: document.querySelector("#ownerLoginDialog"),
   loginForm: document.querySelector("#ownerLoginForm"),
   ownerUsername: document.querySelector("#ownerUsername"),
@@ -671,6 +672,16 @@ function handleOwnerTrigger() {
   void loadOwnerPortal({ open: true });
 }
 
+// 管理员登录后「管理后台」入口就直接显示出来，不用再连点四下。
+async function refreshOwnerEntry() {
+  try {
+    const status = await requestJson("/api/owner/status");
+    elements.ownerEntry.hidden = status.authenticated !== true;
+  } catch {
+    elements.ownerEntry.hidden = true;
+  }
+}
+
 async function handleOwnerLogin(event) {
   event.preventDefault();
   const username = elements.ownerUsername.value.trim();
@@ -692,6 +703,7 @@ async function handleOwnerLogin(event) {
     elements.ownerUsername.value = "";
     elements.ownerPassword.value = "";
     elements.loginDialog.close();
+    elements.ownerEntry.hidden = false;
     await loadOwnerPortal({ open: true });
   } catch (error) {
     const message = error instanceof ApiError && error.status === 401
@@ -868,6 +880,7 @@ async function logoutOwner() {
   } catch { /* the workspace still closes if the network request fails */ }
   state.ownerPortal = null;
   elements.workspaceDialog.close();
+  elements.ownerEntry.hidden = true;
   elements.ownerTrigger.focus();
   elements.status.textContent = copyText("logout", "已退出管理");
   elements.status.dataset.state = "ready";
@@ -887,6 +900,7 @@ function bindDialogs() {
 
 function bindOwnerUi() {
   elements.ownerTrigger.addEventListener("click", handleOwnerTrigger);
+  elements.ownerEntry.addEventListener("click", () => void loadOwnerPortal({ open: true }));
   elements.loginForm.addEventListener("submit", handleOwnerLogin);
   elements.refreshButton.addEventListener("click", () => void loadOwnerPortal());
   elements.logoutButton.addEventListener("click", () => void logoutOwner());
@@ -910,6 +924,7 @@ function bindOwnerUi() {
 function start() {
   state.features = fallbackFeatures();
   bindOwnerUi();
+  void refreshOwnerEntry();
   void loadCopyFields();
   void loadFeatures();
 }

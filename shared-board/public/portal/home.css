@@ -93,6 +93,7 @@ a { color: inherit; }
 
 .current-section {
   flex: 0 0 auto;
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -131,6 +132,33 @@ a { color: inherit; }
 .workspace-tabs button:focus-visible,
 .primary-button:focus-visible,
 .quiet-button:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+/* 管理员专属入口：只有 owner 会话有效时才显示（见 home.js refreshOwnerEntry）。 */
+.admin-entry {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 8px 14px;
+  border: 1px solid rgba(238, 154, 82, .68);
+  border-radius: 6px;
+  background: rgba(238, 154, 82, .16);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background-color .18s ease, border-color .18s ease;
+}
+
+.admin-entry:hover {
+  border-color: var(--accent);
+  background: rgba(238, 154, 82, .3);
+}
+
+.admin-entry:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
 }

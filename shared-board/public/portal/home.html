@@ -29,6 +29,7 @@
         </span>
       </a>
       <button class="current-section" id="ownerTrigger" type="button" aria-current="page" data-copy="section">功能中心</button>
+      <button class="admin-entry" id="ownerEntry" type="button" hidden>管理后台</button>
     </header>
 
     <main class="portal-main">
@@ -205,12 +206,12 @@
           <section class="workspace-panel admin-panel" id="ownerPanelCredentials" role="tabpanel" aria-labelledby="ownerTabCredentials" data-owner-panel="credentials" hidden>
             <form class="settings-form" id="ownerCredentialsForm">
               <fieldset class="settings-group">
-                <legend>访客账号</legend>
-                <label for="siteUsername">访客账号</label>
+                <legend>用户账号</legend>
+                <label for="siteUsername">用户账号</label>
                 <input id="siteUsername" name="siteUsername" type="text" autocomplete="username" maxlength="128" required>
-                <label for="sitePassword">访客密码</label>
+                <label for="sitePassword">用户密码</label>
                 <input id="sitePassword" name="sitePassword" type="password" autocomplete="new-password" minlength="6" maxlength="128">
-                <p class="field-hint">留空表示不修改；访客登录后只能浏览页面与功能，不能进入管理界面。</p>
+                <p class="field-hint">留空表示不修改；用户级账号能用全部功能，但看不到管理界面。</p>
               </fieldset>
 
               <fieldset class="settings-group">
@@ -219,7 +220,7 @@
                 <input id="credOwnerUsername" name="ownerUsername" type="text" autocomplete="username" maxlength="128" required>
                 <label for="credOwnerPassword">管理员密码</label>
                 <input id="credOwnerPassword" name="ownerPassword" type="password" autocomplete="new-password" minlength="6" maxlength="128">
-                <p class="field-hint">留空表示不修改；管理员登录后才有权进入管理界面并修改这里。</p>
+                <p class="field-hint">留空表示不修改；管理员能用用户级的全部功能，并额外进入管理后台。</p>
               </fieldset>
 
               <div class="settings-actions">

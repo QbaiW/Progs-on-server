@@ -5,8 +5,10 @@ const os = require("node:os");
 const path = require("node:path");
 const { createStarBottleServer } = require("./server");
 
-const SITE_USERNAME = "QbaiW";
+const SITE_USERNAME = "Yuna";
 const SITE_PASSWORD = "TestSite!Password-2048";
+const OWNER_USERNAME = "QbaiW";
+const OWNER_PASSWORD = "TestOwner!Password-4096";
 
 function bundledNotes() {
   return JSON.parse(fs.readFileSync(path.join(__dirname, "data", "notes.json"), "utf8"));
@@ -23,7 +25,8 @@ async function startFixture(t) {
 
   const server = createStarBottleServer({
     dataDir,
-    ownerPassword: SITE_PASSWORD,
+    ownerUsername: OWNER_USERNAME,
+    ownerPassword: OWNER_PASSWORD,
     siteUsername: SITE_USERNAME,
     sitePassword: SITE_PASSWORD,
     watch: false,
@@ -167,27 +170,72 @@ test("site login requires both credentials and unlocks every registered feature"
   assert.equal(afterLogout.response.status, 401);
 });
 
-test("owner session does not bypass the site account gate", async (t) => {
+test("管理员会话拥有用户级的全部权限，用户会话进不了管理面", async (t) => {
   const baseUrl = await startFixture(t);
   const ownerLogin = await requestJson(baseUrl, "/api/owner/login", {
     method: "POST",
-    body: { username: SITE_USERNAME, password: SITE_PASSWORD },
+    body: { username: OWNER_USERNAME, password: OWNER_PASSWORD },
   });
   assert.equal(ownerLogin.response.status, 200);
   const ownerCookie = cookieFrom(ownerLogin.response);
   assert.match(ownerCookie, /^star_bottle_owner=/);
 
-  const page = await requestJson(baseUrl, "/home", { cookie: ownerCookie });
-  assert.equal(page.response.status, 302);
-  const api = await requestJson(baseUrl, "/api/notes", { cookie: ownerCookie });
-  assert.equal(api.response.status, 401);
+  // 管理员 = 用户级功能 + 管理面：站点门直接放行，不需要另外的 site 会话。
+  for (const pathname of ["/home", "/star-bottle", "/api/notes", "/api/features"]) {
+    const allowed = await requestJson(baseUrl, pathname, { cookie: ownerCookie });
+    assert.equal(allowed.response.status, 200, pathname);
+  }
+  const ownerPortal = await requestJson(baseUrl, "/api/owner/portal", { cookie: ownerCookie });
+  assert.equal(ownerPortal.response.status, 200);
+  const siteStatus = await requestJson(baseUrl, "/api/site/status", { cookie: ownerCookie });
+  assert.deepEqual(siteStatus.body, { authenticated: true });
+
+  // 反过来不成立：用户级会话只是用户级。
+  const siteLogin = await requestJson(baseUrl, "/api/site/login", {
+    method: "POST",
+    body: { username: SITE_USERNAME, password: SITE_PASSWORD },
+  });
+  assert.equal(siteLogin.response.status, 200);
+  assert.equal(siteLogin.body.owner, false);
+  const siteCookie = cookieFrom(siteLogin.response);
+  assert.match(siteCookie, /^star_bottle_access=/);
+  assert.equal((await requestJson(baseUrl, "/api/owner/status", { cookie: siteCookie })).body.authenticated, false);
+  assert.equal((await requestJson(baseUrl, "/api/owner/portal", { cookie: siteCookie })).response.status, 401);
+});
+
+test("用管理员账号走站点登录时顺带建立管理会话", async (t) => {
+  const baseUrl = await startFixture(t);
+  const login = await requestJson(baseUrl, "/api/site/login", {
+    method: "POST",
+    body: { username: OWNER_USERNAME, password: OWNER_PASSWORD },
+  });
+  assert.equal(login.response.status, 200);
+  assert.equal(login.body.authenticated, true);
+  assert.equal(login.body.owner, true);
+  const cookies = login.response.headers.getSetCookie();
+  assert.equal(cookies.length, 2);
+  assert.match(cookies[0], /^star_bottle_access=/);
+  assert.match(cookies[1], /^star_bottle_owner=/);
+
+  const cookieHeader = cookies.map((value) => value.split(";", 1)[0]).join("; ");
+  assert.equal((await requestJson(baseUrl, "/api/owner/status", { cookie: cookieHeader })).body.authenticated, true);
+  assert.equal((await requestJson(baseUrl, "/api/owner/portal", { cookie: cookieHeader })).response.status, 200);
+  assert.equal((await requestJson(baseUrl, "/api/notes", { cookie: cookieHeader })).response.status, 200);
+
+  // 退出登录要把管理身份一起清掉，否则 owner 会话仍然能访问站点。
+  const logout = await requestJson(baseUrl, "/api/site/logout", { method: "POST", cookie: cookieHeader });
+  assert.equal(logout.response.status, 200);
+  const cleared = logout.response.headers.getSetCookie();
+  assert.match(cleared.find((value) => value.startsWith("star_bottle_owner=")) || "", /star_bottle_owner=;/);
+  assert.equal((await requestJson(baseUrl, "/api/owner/status", { cookie: cookieHeader })).body.authenticated, false);
+  assert.equal((await requestJson(baseUrl, "/home", { cookie: cookieHeader })).response.status, 302);
 });
 
 test("owner APIs are reachable with an owner session alone (no site login)", async (t) => {
   const baseUrl = await startFixture(t);
   const ownerLogin = await requestJson(baseUrl, "/api/owner/login", {
     method: "POST",
-    body: { username: SITE_USERNAME, password: SITE_PASSWORD },
+    body: { username: OWNER_USERNAME, password: OWNER_PASSWORD },
   });
   assert.equal(ownerLogin.response.status, 200);
   const ownerCookie = cookieFrom(ownerLogin.response);
@@ -204,16 +252,16 @@ test("a credential change only logs out the role that changed", async (t) => {
   const baseUrl = await startFixture(t);
   const ownerLogin = await requestJson(baseUrl, "/api/owner/login", {
     method: "POST",
-    body: { username: SITE_USERNAME, password: SITE_PASSWORD },
+    body: { username: OWNER_USERNAME, password: OWNER_PASSWORD },
   });
   assert.equal(ownerLogin.response.status, 200);
   const ownerCookie = cookieFrom(ownerLogin.response);
 
-  // Change only the visitor creds; the owner session must stay valid.
+  // Change only the user creds; the owner session must stay valid.
   const saved = await requestJson(baseUrl, "/api/owner/portal/credentials", {
     method: "PUT",
     cookie: ownerCookie,
-    body: { siteUsername: "QbaiW", sitePassword: "NewVisitorPass9" },
+    body: { siteUsername: "Yuna", sitePassword: "NewVisitorPass9" },
   });
   assert.equal(saved.response.status, 200);
   const portalAfter = await requestJson(baseUrl, "/api/owner/portal", { cookie: ownerCookie });
@@ -226,7 +274,7 @@ test("site login does not reset owner login throttling", async (t) => {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const ownerLogin = await requestJson(baseUrl, "/api/owner/login", {
       method: "POST",
-      body: { username: SITE_USERNAME, password: `wrong-owner-password-${attempt}` },
+      body: { username: OWNER_USERNAME, password: `wrong-owner-password-${attempt}` },
     });
     assert.equal(ownerLogin.response.status, 401);
   }
@@ -239,7 +287,7 @@ test("site login does not reset owner login throttling", async (t) => {
 
   const throttledOwnerLogin = await requestJson(baseUrl, "/api/owner/login", {
     method: "POST",
-    body: { username: SITE_USERNAME, password: SITE_PASSWORD },
+    body: { username: OWNER_USERNAME, password: OWNER_PASSWORD },
   });
   assert.equal(throttledOwnerLogin.response.status, 429);
 });

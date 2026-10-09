@@ -1,4 +1,4 @@
-# 圆圆和QE的星空小铺
+﻿# 圆圆和QE的星空小铺
 
 一个包含多个功能入口的网站。`/home` 是功能中心；普通访问者可以从这里进入星星瓶、七夕星空情书和严格教育现场。星星瓶仍保留原有纸条、收藏和主人编辑能力。
 
@@ -11,11 +11,11 @@
 - `http://localhost:8787/wrong`：严格教育现场。
 - `http://localhost:8787/envelopes`：信封记录（一格一个信封，打开就是一个能写字、贴图的备忘录）。
 
-首次打开会先进入登录页。访客账号为 `SITE_USERNAME`，密码为 `SITE_PASSWORD`；登录会话默认保持 12 小时，未登录时页面、静态资源和功能 API 都不会返回内容。站长/管理是**独立**的一套账号，使用 `OWNER_USERNAME` + `OWNER_PASSWORD` 登录（管理员登录需要账号和密码）；访客登录后只能浏览页面与功能，不能进入管理界面。
+首次打开会先进入登录页，账号分两级，都在同一个登录框里输入。**用户级**是 `SITE_USERNAME` + `SITE_PASSWORD`（默认 `Yuna`），能打开全部页面、静态资源和功能 API；**管理员级**是 `OWNER_USERNAME` + `OWNER_PASSWORD`（默认 `QbaiW`），权限上包含用户级的全部功能，另外还能进入管理后台。登录会话默认保持 12 小时，未登录时页面、静态资源和功能 API 都不会返回内容。用管理员账号登录站点时，服务端会同时下发管理会话（两个 Cookie：`star_bottle_access` + `star_bottle_owner`）；用户级账号拿不到管理会话，`/api/owner/*` 一律 401。
 
 功能中心通过 `GET /api/features` 读取功能目录。页面入口、导航和服务端路由都来自 `config/features.js`，不会把内部文件路径返回给浏览器。
 
-功能中心右上角的“功能中心”在 2.6 秒内连续点击 4 次会打开隐藏的站长入口。它使用独立的管理账号（`OWNER_USERNAME`）与管理密码（`OWNER_PASSWORD`）登录，与访客账号互不通用；登录后可以查看匿名浏览器的主页访问和功能打开记录、填写访客称呼与备注、发布公告、修改卡片标题/说明/重点/强调色，并可在“账号设置”里分别修改访客账号密码和管理员账号密码。详细操作见本机的 `OWNER-ACCESS.txt`。
+管理后台有两个入口：主页右上角在管理员登录后会显示「管理后台」按钮（`#ownerEntry`，来自 `GET /api/owner/status` 的结果）；功能中心右上角的“功能中心”在 2.6 秒内连续点击 4 次是保留下来的隐藏入口。两者打开同一个管理面板，用管理员账号（`OWNER_USERNAME`）+ 管理密码（`OWNER_PASSWORD`）登录；登录后可以查看匿名浏览器的主页访问和功能打开记录、填写访客称呼与备注、发布公告、修改卡片标题/说明/重点/强调色，并可在“账号设置”里分别修改用户账号密码和管理员账号密码。详细操作见本机的 `OWNER-ACCESS.txt`。
 
 > 修改过的账号密码保存在 `data/settings.json`，且**优先于 `.env` 里的同名配置**——后台改完重启后仍然生效。如果忘记密码，需要在服务器上直接编辑或删除 `data/settings.json`，或通过后台改回；仅修改 `.env` 不会覆盖已保存的值。
 
@@ -65,7 +65,7 @@ lib/feature-registry.js   注册表校验与公开数据投影
 lib/portal-state.js       主页设置和访问活动的数据校验
 public/portal/            功能中心页面、样式和脚本
 public/index.html         星星瓶页面（保留根级资源兼容路径）
-public/login.html         访客登录页
+public/login.html         站点登录页（用户级 / 管理员级共用）
 public/favicon.png        网站图标（64×64，另有一张 favicon-180.png 供苹果/主屏）
 public/love-stars/        七夕星空情书页面及资源
 public/wrong/             严格教育现场页面、Matter.js 和图片资源
@@ -74,7 +74,7 @@ data/notes.json           纸条内容（不提交）
 data/favorites.json       收藏（不提交）
 data/activity.json        星星打开记录（不提交）
 data/owner-devices.json   主人设备名单（不提交）
-data/settings.json        访客/管理员账号密码与会话时长（不提交）
+data/settings.json        用户级/管理员级账号密码与会话时长（不提交）
 data/love-stars-messages.json  七夕留言运行数据（不提交）
 data/wrong-counter.json        敲打统计运行数据（不提交）
 data/wrong-bubbles.json        教育现场气泡文案，管理员可改（不提交）
@@ -82,7 +82,7 @@ data/portal-settings.json      主页公告、卡片覆盖和访客备注（不�
 data/portal-activity.json      主页访问与功能打开记录（不提交）
 data/envelopes.json            信封记录内容（不提交）
 test-auth.js               鉴权与主人编辑测试
-test-site-auth.js          访客登录门测试
+test-site-auth.js          站点登录门与两级账号测试
 test-portal.js             门户与注册表测试
 test-portal-admin.js       主页访问记录和站长管理测试
 test-love-stars.js         七夕功能/API 测试

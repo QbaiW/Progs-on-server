@@ -14,7 +14,7 @@
 - `/wrong`：严格教育现场。点击舞台，看圆圆宝宝拿小锤子敲打 QE。
 - `/envelopes`：信封记录。一格一个信封，打开就是一个能写字、贴图的备忘录；先阅读，点「编辑」才动手改。
 
-首次打开会先进入登录页。访客登录使用 `SITE_USERNAME` / `SITE_PASSWORD`；站长/管理是独立账号，使用 `OWNER_USERNAME` / `OWNER_PASSWORD`（需要账号+密码）登录，访客登录后无法进入管理界面。两套账号密码都可在管理后台的“账号设置”里修改。功能注册表在 `config/features.js`，新增功能从这里接入。
+首次打开会先进入登录页，账号分两级、共用同一个登录框：**用户级**是 `SITE_USERNAME` / `SITE_PASSWORD`（默认 `Yuna`），能打开全部页面和功能；**管理员级**是 `OWNER_USERNAME` / `OWNER_PASSWORD`（默认 `QbaiW`），权限包含用户级的全部功能，另外还能进管理后台（`/home` 右上角登录后会多出「管理后台」按钮，功能中心连点 4 次的隐藏入口也还在）。用户级账号拿不到管理会话，`/api/owner/*` 一律 401。两套账号密码都可在管理后台的“账号设置”里修改。功能注册表在 `config/features.js`，新增功能从这里接入。
 
 > 账号密码在管理后台“账号设置”里修改后，会写入服务器的 `data/settings.json`，并**覆盖 `.env` 里的同名配置**（`data/settings.json` 优先）。如果忘记密码，需要直接在服务器上编辑或删除 `data/settings.json`，或通过后台改回；光改 `.env` 不会生效。
 
@@ -91,7 +91,7 @@ bash shared-board/deploy-server.sh
 
 - 宝塔软件商店通过“Node.js 版本管理器”安装 Node.js 20 或 22，再安装 PM2。
 - 在 `shared-board` 目录执行：`npm install --omit=dev --package-lock=false`，以及 `npm install -g pm2`。
-- 新建 `shared-board/.env`，设置 `NODE_ENV`、`HOST=127.0.0.1`、`PORT=8787`、`BOARD_DATA_DIR=/www/wwwroot/qe-star-bottle/data`、`OWNER_USERNAME`、`OWNER_PASSWORD`、`SITE_USERNAME`、`SITE_PASSWORD`、`SESSION_HOURS=12`。请使用长随机密码，不要用简单数字密码。管理员用 `OWNER_USERNAME` + `OWNER_PASSWORD` 登录，访客用 `SITE_USERNAME` + `SITE_PASSWORD` 登录，二者互不通用。
+- 新建 `shared-board/.env`，设置 `NODE_ENV`、`HOST=127.0.0.1`、`PORT=8787`、`BOARD_DATA_DIR=/www/wwwroot/qe-star-bottle/data`、`OWNER_USERNAME=QbaiW`、`OWNER_PASSWORD`、`SITE_USERNAME=Yuna`、`SITE_PASSWORD`、`SESSION_HOURS=12`。请使用长随机密码，不要用简单数字密码。管理员用 `OWNER_USERNAME` + `OWNER_PASSWORD` 登录（权限含用户级全部功能 + 管理后台），用户用 `SITE_USERNAME` + `SITE_PASSWORD` 登录（只有页面和功能）。账号名如果改成了别的，记得同步改 `data/settings.json`：该文件里的账号密码优先于 `.env`。
 - 执行 `pm2 start ecosystem.config.cjs`、`pm2 save`、`pm2 startup`（复制并执行其打印的命令），再 `pm2 save` 并检查 `curl http://127.0.0.1:8787/api/health`。
 
 ### 域名与 HTTPS
