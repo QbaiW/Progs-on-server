@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "start:production": "node server.js",
-    "test": "node --test test-auth.js test-portal.js test-portal-admin.js test-love-stars.js test-wrong.js test-site-auth.js"
+    "test": "node --test test-auth.js test-portal.js test-portal-admin.js test-love-stars.js test-wrong.js test-site-auth.js test-envelopes.js"
   },
   "engines": {
     "node": ">=18.18.0"

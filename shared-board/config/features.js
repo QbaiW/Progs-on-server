@@ -43,4 +43,14 @@ module.exports = Object.freeze([
     order: 40,
     enabled: true,
   }),
+  Object.freeze({
+    id: "envelopes",
+    title: "信封记录",
+    description: "一格一个信封，打开就是一个能写字、能贴图的备忘录。",
+    icon: "✉",
+    path: "/envelopes",
+    entry: "/envelopes/index.html",
+    order: 50,
+    enabled: true,
+  }),
 ]);

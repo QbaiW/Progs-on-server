@@ -32,7 +32,8 @@ $optionalDataNames = @(
     "wrong-counter.json",
     "wrong-bubbles.json",
     "portal-settings.json",
-    "portal-activity.json"
+    "portal-activity.json",
+    "envelopes.json"
 )
 $dataNames = @($requiredDataNames + $optionalDataNames)
 
@@ -105,6 +106,7 @@ function Test-JsonFile([string]$Path, [string]$Name) {
         "wrong-bubbles.json" { "phrases" }
         "portal-settings.json" { "features" }
         "portal-activity.json" { "entries" }
+        "envelopes.json" { "memos" }
     }
     if (-not ($document.PSObject.Properties.Name -contains $requiredProperty)) {
         Fail "$Name is missing the '$requiredProperty' property"

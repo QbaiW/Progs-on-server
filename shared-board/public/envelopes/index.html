@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#f9f8f3" />
+    <title>信封记录</title>
+    <link rel="icon" href="/favicon.png" sizes="64x64" />
+    <link rel="apple-touch-icon" href="/favicon-180.png" />
+    <link rel="stylesheet" href="/envelopes/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <div class="brand" aria-label="信封记录">
+          <span class="brand-mark" aria-hidden="true">✉</span>
+          <span class="brand-name">信封记录</span>
+        </div>
+
+        <div class="controls">
+          <button class="ghost-button" id="new-memo" type="button">＋ 新信封</button>
+          <a class="ghost-button home-link" href="/home">
+            <span aria-hidden="true">⌂</span>
+            <span>功能中心</span>
+          </a>
+        </div>
+      </header>
+
+      <section class="board" aria-label="所有信封">
+        <p class="board-status" id="board-status" role="status" aria-live="polite"></p>
+        <div class="memo-grid" id="memo-grid"></div>
+      </section>
+    </main>
+
+    <div class="editor" id="editor" hidden>
+      <div class="editor-backdrop" data-editor-close></div>
+      <section
+        class="editor-panel"
+        id="editor-panel"
+        data-mode="read"
+        role="dialog"
+        aria-modal="true"
+        aria-label="信封内容"
+      >
+        <div class="pane pane-read">
+          <header class="editor-head">
+            <h2 class="reader-title" id="reader-title"></h2>
+            <div class="editor-head-actions">
+              <span class="editor-state" id="reader-state" role="status" aria-live="polite"></span>
+              <button class="primary-button" id="edit-memo" type="button">编辑</button>
+              <button
+                class="icon-button"
+                id="reader-close"
+                type="button"
+                aria-label="关闭"
+                data-editor-close
+              >
+                <span aria-hidden="true">×</span>
+              </button>
+            </div>
+          </header>
+          <div class="reader-body" id="reader-body"></div>
+        </div>
+
+        <div class="pane pane-write">
+          <header class="editor-head">
+            <input
+              class="memo-title"
+              id="memo-title"
+              type="text"
+              maxlength="60"
+              placeholder="信封标题"
+              aria-label="信封标题"
+              autocomplete="off"
+            />
+            <div class="editor-head-actions">
+              <span class="editor-state" id="editor-state" role="status" aria-live="polite"></span>
+              <button class="ghost-button" id="finish-memo" type="button">完成</button>
+              <button
+                class="icon-button"
+                id="editor-close"
+                type="button"
+                aria-label="关闭"
+                data-tooltip="关闭"
+              >
+                <span aria-hidden="true">×</span>
+              </button>
+            </div>
+          </header>
+
+          <div class="editor-body" id="editor-body"></div>
+
+          <div class="format-bar">
+            <span class="format-label">选中段落</span>
+            <div class="format-options" id="format-options" role="group" aria-label="段落格式">
+              <button class="format-button" type="button" data-format="text">正文</button>
+              <button class="format-button" type="button" data-format="md">Markdown</button>
+              <button class="format-button" type="button" data-format="title">主标题</button>
+              <button class="format-button" type="button" data-format="subtitle">副标题</button>
+            </div>
+          </div>
+
+          <footer class="editor-foot">
+            <div class="editor-tools">
+              <button class="ghost-button" id="add-text" type="button">＋ 文字</button>
+              <button class="ghost-button" id="add-image" type="button">＋ 图片</button>
+              <input id="image-input" type="file" accept="image/*" hidden />
+            </div>
+            <div class="editor-tools">
+              <button class="danger-button" id="delete-memo" type="button">删除信封</button>
+              <button class="primary-button" id="save-memo" type="button">保存</button>
+            </div>
+          </footer>
+          <p class="editor-error" id="editor-error" role="alert" aria-live="polite"></p>
+        </div>
+      </section>
+    </div>
+
+    <script src="/envelopes/app.js"></script>
+  </body>
+</html>

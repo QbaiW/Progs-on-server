@@ -12,6 +12,7 @@
 - `/star-bottle`：星星瓶。从星河里挑一颗星星，打开一张给圆圆宝宝的纸条；保留原有纸条、收藏和主人编辑能力。
 - `/love-stars`：七夕星空情书。旋转视角，在星尘与双星之间发现一封隐藏的告白。
 - `/wrong`：严格教育现场。点击舞台，看圆圆宝宝拿小锤子敲打 QE。
+- `/envelopes`：信封记录。一格一个信封，打开就是一个能写字、贴图的备忘录；先阅读，点「编辑」才动手改。
 
 首次打开会先进入登录页。访客登录使用 `SITE_USERNAME` / `SITE_PASSWORD`；站长/管理是独立账号，使用 `OWNER_USERNAME` / `OWNER_PASSWORD`（需要账号+密码）登录，访客登录后无法进入管理界面。两套账号密码都可在管理后台的“账号设置”里修改。功能注册表在 `config/features.js`，新增功能从这里接入。
 
@@ -48,7 +49,7 @@ qe-star-bottle-deploy-*.zip   (gitignore) 生成的部署压缩包
 - `PULL-SERVER-DATA.cmd`：把服务器数据下载到本地 `server-data\from-server`。
 - `PUSH-SERVER-DATA.cmd`：把该本地文件夹上传到服务器。
 
-四个核心文件（`notes.json`、`favorites.json`、`activity.json`、`owner-devices.json`）总是被同步；功能数据存在时一并同步：`love-stars-messages.json`、`wrong-counter.json`、`wrong-bubbles.json`、`portal-settings.json`、`portal-activity.json`。`settings.json` 与 `.env` 永远不会被该工具同步，因为它们包含服务器专属的凭据和配置。
+四个核心文件（`notes.json`、`favorites.json`、`activity.json`、`owner-devices.json`）总是被同步；功能数据存在时一并同步：`love-stars-messages.json`、`wrong-counter.json`、`wrong-bubbles.json`、`portal-settings.json`、`portal-activity.json`、`envelopes.json`。`settings.json` 与 `.env` 永远不会被该工具同步，因为它们包含服务器专属的凭据和配置。
 
 - 拉取会把之前的本地文件夹备份到 `server-data\backups`。推送会在服务器 `/var/backups/qe-star-bottle` 下创建带时间戳的备份，替换数据后重启 PM2，并检查 `/api/health`。
 - 本地服务只读写下载的数据副本，不会直接修改云服务器。需要传回服务器时再运行 `PUSH-SERVER-DATA.cmd`。
@@ -114,6 +115,7 @@ data/wrong-counter.json
 data/wrong-bubbles.json
 data/portal-settings.json
 data/portal-activity.json
+data/envelopes.json
 ```
 
 后几个文件在对应功能首次产生数据前可能尚不存在。`settings.json` 或生产 `.env` 中含站长密码，不要上传到公开仓库。

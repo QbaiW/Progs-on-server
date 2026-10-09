@@ -53,6 +53,23 @@ const WRONG_HIT_LIMIT = 240;
 const WRONG_VISITOR_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{3,127}$/;
 const WRONG_BUBBLE_MAX_COUNT = 100;
 const WRONG_BUBBLE_MAX_LENGTH = 80;
+const MEMO_MAX_COUNT = 200;
+const MEMO_TITLE_MAX_LENGTH = 60;
+const MEMO_BLOCK_MAX_COUNT = 200;
+const MEMO_TEXT_MAX_LENGTH = 20000;
+// text = 普通段落, md = Markdown, title/subtitle = 手动指定的主标题/副标题
+const MEMO_TEXT_FORMATS = new Set(["text", "md", "title", "subtitle"]);
+const MEMO_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+const MEMO_IMAGE_TYPES = new Map([
+  ["image/jpeg", "jpg"],
+  ["image/png", "png"],
+  ["image/webp", "webp"],
+  ["image/gif", "gif"],
+]);
+// Uploaded files are written by this server under public/envelopes/uploads with a
+// generated name, so the stored URL only has to stay inside that directory.
+const MEMO_IMAGE_URL_PATTERN =
+  /^\/envelopes\/uploads\/[A-Za-z0-9][A-Za-z0-9._-]{0,80}\.(?:jpg|png|webp|gif)$/i;
 const SESSION_COOKIE = "star_bottle_owner";
 const SITE_SESSION_COOKIE = "star_bottle_access";
 const PORTAL_VISITOR_COOKIE = "myuan_portal_visitor";
@@ -632,6 +649,106 @@ function readLoveStarsMessages(messagesFile) {
   }
 }
 
+function emptyEnvelopesDocument() {
+  return { version: 1, updatedAt: new Date().toISOString(), memos: [] };
+}
+
+function normalizeMemoBlocks(raw) {
+  if (!Array.isArray(raw)) return null;
+  const blocks = [];
+  for (const block of raw.slice(0, MEMO_BLOCK_MAX_COUNT)) {
+    if (!block || typeof block !== "object") continue;
+    if (block.type === "text") {
+      const text = typeof block.text === "string" ? block.text.slice(0, MEMO_TEXT_MAX_LENGTH) : "";
+      if (!text.trim()) continue;
+      const format = MEMO_TEXT_FORMATS.has(block.format) ? block.format : "text";
+      blocks.push({ type: "text", text, format });
+      continue;
+    }
+    const url = typeof block.url === "string" ? block.url : "";
+    if (block.type === "image" && MEMO_IMAGE_URL_PATTERN.test(url)) {
+      blocks.push({ type: "image", url });
+    }
+  }
+  return blocks;
+}
+
+function normalizeEnvelopesDocument(raw) {
+  if (!raw || !Array.isArray(raw.memos)) return emptyEnvelopesDocument();
+  const seen = new Set();
+  const memos = raw.memos.slice(0, MEMO_MAX_COUNT).flatMap((memo) => {
+    if (!memo || typeof memo !== "object") return [];
+    const id = typeof memo.id === "string" && /^[A-Za-z0-9_-]{6,40}$/.test(memo.id) ? memo.id : "";
+    const blocks = normalizeMemoBlocks(memo.blocks);
+    if (!id || !blocks || seen.has(id)) return [];
+    seen.add(id);
+    const title = typeof memo.title === "string" ? memo.title.trim() : "";
+    return [{
+      id,
+      title: title.slice(0, MEMO_TITLE_MAX_LENGTH) || "未命名信封",
+      blocks,
+      createdAt: normalizeTimestamp(memo.createdAt),
+      updatedAt: normalizeTimestamp(memo.updatedAt) || normalizeTimestamp(memo.createdAt),
+    }];
+  });
+  return {
+    version: Number.isSafeInteger(raw.version) && raw.version > 0 ? raw.version : 1,
+    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : new Date().toISOString(),
+    memos,
+  };
+}
+
+function readEnvelopes(envelopesFile) {
+  try {
+    return normalizeEnvelopesDocument(JSON.parse(fs.readFileSync(envelopesFile, "utf8")));
+  } catch (error) {
+    if (error.code === "ENOENT") return emptyEnvelopesDocument();
+    throw error;
+  }
+}
+
+function readRawBody(request, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    let settled = false;
+    request.on("data", (chunk) => {
+      if (settled) return;
+      size += chunk.length;
+      if (size > limit) {
+        settled = true;
+        reject(requestError("图片太大", 413));
+        request.resume();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on("end", () => {
+      if (settled) return;
+      settled = true;
+      resolve(Buffer.concat(chunks));
+    });
+    request.on("error", (error) => {
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    });
+  });
+}
+
+function imageSignatureMatches(extension, bytes) {
+  if (extension === "jpg") return bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8;
+  if (extension === "png") return bytes.length > 8 && bytes.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  if (extension === "gif") return bytes.length > 6 && bytes.subarray(0, 4).toString("ascii") === "GIF8";
+  if (extension === "webp") {
+    return bytes.length > 12 &&
+      bytes.subarray(0, 4).toString("ascii") === "RIFF" &&
+      bytes.subarray(8, 12).toString("ascii") === "WEBP";
+  }
+  return false;
+}
+
 function normalizeNonNegativeInteger(value) {
   const number = Number(value);
   if (!Number.isFinite(number) || number <= 0) return 0;
@@ -1038,6 +1155,8 @@ function createStarBottleServer(options = {}) {
   const loveStarsMessagesFile = path.join(dataDir, "love-stars-messages.json");
   const wrongCounterFile = path.join(dataDir, "wrong-counter.json");
   const wrongBubblesFile = path.join(dataDir, "wrong-bubbles.json");
+  const envelopesFile = path.join(dataDir, "envelopes.json");
+  const envelopeUploadsDir = path.join(realPublicDir, "envelopes", "uploads");
   const portalSettingsFile = path.join(dataDir, "portal-settings.json");
   const portalActivityFile = path.join(dataDir, "portal-activity.json");
   let settings = readSettings(settingsFile, options.ownerPassword, options);
@@ -1059,6 +1178,7 @@ function createStarBottleServer(options = {}) {
     wrongBubblesFile,
     path.join(realPublicDir, "wrong", "phrases.txt"),
   );
+  let envelopesDocument = readEnvelopes(envelopesFile);
   let portalSettingsDocument = readPortalSettings(portalSettingsFile, registeredFeatureIds);
   let portalActivityDocument = readPortalActivity(portalActivityFile, registeredFeaturePathsById);
   let watcher = null;
@@ -1280,6 +1400,26 @@ function createStarBottleServer(options = {}) {
       "气泡内容",
     );
     wrongBubblesDocument = persisted;
+    return persisted;
+  }
+
+  function memoPayload(body) {
+    if (!plainObject(body)) throw requestError("信封内容格式不正确");
+    assertOnlyKeys(body, new Set(["title", "blocks"]), "信封");
+    const blocks = normalizeMemoBlocks(body.blocks);
+    if (!blocks) throw requestError("blocks 必须是数组");
+    const title = typeof body.title === "string" ? body.title.trim().slice(0, MEMO_TITLE_MAX_LENGTH) : "";
+    return { title: title || "未命名信封", blocks };
+  }
+
+  function saveEnvelopes(nextDocument) {
+    const persisted = writeJsonFileSafely(
+      envelopesFile,
+      nextDocument,
+      normalizeEnvelopesDocument,
+      "信封记录",
+    );
+    envelopesDocument = persisted;
     return persisted;
   }
 
@@ -2093,6 +2233,141 @@ function createStarBottleServer(options = {}) {
     if (wrongPhrasesPath) {
       writeJson(response, 405, { ok: false, error: "GET or PUT is required" }, {
         Allow: "GET, HEAD, PUT, OPTIONS",
+      });
+      return true;
+    }
+
+    const envelopesEnabled = enabledFeatureIds.has("envelopes");
+    const envelopesPath = envelopesEnabled &&
+      (pathname === "/api/envelopes" || pathname === "/api/envelopes/");
+    const memoImagePath = envelopesEnabled &&
+      (pathname === "/api/envelopes/image" || pathname === "/api/envelopes/image/");
+    const memoMatch = envelopesEnabled && !memoImagePath
+      ? pathname.match(/^\/api\/envelopes\/([A-Za-z0-9_-]{6,40})\/?$/)
+      : null;
+
+    if (memoImagePath) {
+      if (request.method === "OPTIONS") {
+        writeJson(response, 200, { ok: true }, {
+          Allow: "POST, OPTIONS",
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
+        });
+        return true;
+      }
+      if (request.method !== "POST") {
+        writeJson(response, 405, { ok: false, error: "POST is required" }, {
+          Allow: "POST, OPTIONS",
+        });
+        return true;
+      }
+      const rawType = String(request.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
+      const extension = MEMO_IMAGE_TYPES.get(rawType);
+      try {
+        if (!extension) throw requestError("只支持 JPG、PNG、WebP 或 GIF 图片");
+        const bytes = await readRawBody(request, MEMO_IMAGE_MAX_BYTES);
+        if (!imageSignatureMatches(extension, bytes)) throw requestError("这个文件不像是图片");
+        await fs.promises.mkdir(envelopeUploadsDir, { recursive: true });
+        const fileName =
+          `${Date.now().toString(36)}-${crypto.randomBytes(8).toString("hex")}.${extension}`;
+        await fs.promises.writeFile(path.join(envelopeUploadsDir, fileName), bytes);
+        writeJson(response, 201, { ok: true, url: `/envelopes/uploads/${fileName}` });
+      } catch (error) {
+        writeJson(response, error.statusCode || 400, {
+          ok: false,
+          error: error.message || "图片保存失败",
+        });
+      }
+      return true;
+    }
+
+    if (envelopesPath && request.method === "OPTIONS") {
+      writeJson(response, 200, { ok: true }, {
+        Allow: "GET, HEAD, POST, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, HEAD, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+      });
+      return true;
+    }
+    if (envelopesPath && (request.method === "GET" || request.method === "HEAD")) {
+      writeJson(response, 200, { ok: true, memos: envelopesDocument.memos }, {
+        Allow: "GET, HEAD, POST, OPTIONS",
+      });
+      return true;
+    }
+    if (envelopesPath && request.method === "POST") {
+      try {
+        const payload = memoPayload(await readJsonBody(request));
+        if (envelopesDocument.memos.length >= MEMO_MAX_COUNT) {
+          throw requestError(`最多 ${MEMO_MAX_COUNT} 个信封`);
+        }
+        const now = new Date().toISOString();
+        const memo = {
+          id: crypto.randomBytes(6).toString("hex"),
+          title: payload.title,
+          blocks: payload.blocks,
+          createdAt: now,
+          updatedAt: now,
+        };
+        saveEnvelopes({
+          version: envelopesDocument.version + 1,
+          updatedAt: now,
+          memos: [memo, ...envelopesDocument.memos].slice(0, MEMO_MAX_COUNT),
+        });
+        writeJson(response, 201, { ok: true, memo });
+      } catch (error) {
+        writeJson(response, error.statusCode || 400, {
+          ok: false,
+          error: error.message || "信封保存失败",
+          code: error.storageCode,
+        });
+      }
+      return true;
+    }
+    if (envelopesPath) {
+      writeJson(response, 405, { ok: false, error: "GET or POST is required" }, {
+        Allow: "GET, HEAD, POST, OPTIONS",
+      });
+      return true;
+    }
+
+    if (memoMatch && (request.method === "PUT" || request.method === "DELETE")) {
+      const current = envelopesDocument.memos.find((memo) => memo.id === memoMatch[1]);
+      if (!current) {
+        writeJson(response, 404, { ok: false, error: "这个信封不存在" });
+        return true;
+      }
+      try {
+        if (request.method === "DELETE") {
+          saveEnvelopes({
+            version: envelopesDocument.version + 1,
+            updatedAt: new Date().toISOString(),
+            memos: envelopesDocument.memos.filter((memo) => memo.id !== current.id),
+          });
+          // ponytail: uploaded images stay on disk; add a sweep if space ever matters.
+          writeJson(response, 200, { ok: true });
+          return true;
+        }
+        const payload = memoPayload(await readJsonBody(request));
+        const memo = { ...current, ...payload, updatedAt: new Date().toISOString() };
+        saveEnvelopes({
+          version: envelopesDocument.version + 1,
+          updatedAt: memo.updatedAt,
+          memos: envelopesDocument.memos.map((item) => (item.id === memo.id ? memo : item)),
+        });
+        writeJson(response, 200, { ok: true, memo });
+      } catch (error) {
+        writeJson(response, error.statusCode || 400, {
+          ok: false,
+          error: error.message || "信封保存失败",
+          code: error.storageCode,
+        });
+      }
+      return true;
+    }
+    if (memoMatch) {
+      writeJson(response, 405, { ok: false, error: "PUT or DELETE is required" }, {
+        Allow: "PUT, DELETE, OPTIONS",
       });
       return true;
     }

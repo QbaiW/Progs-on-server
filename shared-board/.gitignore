@@ -10,5 +10,7 @@ OWNER-ACCESS.txt
 .env.*
 !.env.example
 node_modules/
+# 信封记录上传的图片：只留在服务器上，不进仓库。
+public/envelopes/uploads/
 # npm creates this on the server; dependencies are declared in package.json.
 /package-lock.json

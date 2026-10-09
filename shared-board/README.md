@@ -9,6 +9,7 @@
 - `http://localhost:8787/star-bottle`：星星瓶。
 - `http://localhost:8787/love-stars`：七夕星空情书。
 - `http://localhost:8787/wrong`：严格教育现场。
+- `http://localhost:8787/envelopes`：信封记录（一格一个信封，打开就是一个能写字、贴图的备忘录）。
 
 首次打开会先进入登录页。访客账号为 `SITE_USERNAME`，密码为 `SITE_PASSWORD`；登录会话默认保持 12 小时，未登录时页面、静态资源和功能 API 都不会返回内容。站长/管理是**独立**的一套账号，使用 `OWNER_USERNAME` + `OWNER_PASSWORD` 登录（管理员登录需要账号和密码）；访客登录后只能浏览页面与功能，不能进入管理界面。
 
@@ -20,14 +21,17 @@
 
 主页展示设置保存到 `data/portal-settings.json`，访问活动保存到 `data/portal-activity.json`。服务端会在访客实际请求 `/home` 或已注册功能页面时记录活动，并用 HttpOnly Cookie 分配匿名浏览器 ID；该标识不等同于真实身份。动态设置只覆盖公开展示字段，不会改变 `config/features.js` 中固定的 `path` 或服务器内部 `entry`。
 
-两个独立功能各自使用命名空间 API 和数据文件：
+三个独立功能各自使用命名空间 API 和数据文件：
 
 - 七夕星空情书：`/api/love-stars/message`，数据保存到 `data/love-stars-messages.json`。
 - 严格教育现场：`/api/wrong/hit` 与 `/api/wrong/stats`，数据保存到 `data/wrong-counter.json`；气泡内容通过 `/api/wrong/phrases` 读写，保存到 `data/wrong-bubbles.json`。
+- 信封记录：`/api/envelopes`（列表/新建）与 `/api/envelopes/<id>`（修改/删除），数据保存到 `data/envelopes.json`；图片通过 `POST /api/envelopes/image` 上传，落到 `public/envelopes/uploads/`，接口返回的地址再写进信封内容。
 
 严格教育现场页面右上角的 `YY` 按钮会打开它的管理面板（输入管理密码）：除了敲打统计，还有一个「气泡内容」编辑框——**每行一条**，直接修改或新增一行再保存，就能改掉/新增敲打时冒出的气泡文案，保存后立即生效。首次运行时气泡内容会从 `public/wrong/phrases.txt` 播种一份默认值。
 
 它们不会调用或覆盖星星瓶原有的 `/api/message`、`/api/hit` 数据。敲打统计与气泡内容接口使用统一的 `OWNER_PASSWORD`（或 `data/settings.json` 中的主人密码），不会复制外部项目的密码或 `state.json`。
+
+信封记录打开一格先是**阅读视图**：主标题、副标题、正文和 Markdown 混排，Markdown 会渲染成标题/列表/引用/代码/粗体。点右上角「编辑」才进入编辑，段落格式在 正文 / Markdown / 主标题 / 副标题 之间随时切换，「＋ 文字」「＋ 图片」增删段落，图片先在浏览器里压到长边 1600 再上传，最后点「保存」。看板卡片用第一张图或前几行文字当封面，登录后任何访客都能编辑这些信封。
 
 ## 新增功能
 
@@ -65,6 +69,7 @@ public/login.html         访客登录页
 public/favicon.png        网站图标（64×64，另有一张 favicon-180.png 供苹果/主屏）
 public/love-stars/        七夕星空情书页面及资源
 public/wrong/             严格教育现场页面、Matter.js 和图片资源
+public/envelopes/         信封记录看板与备忘录编辑器（uploads/ 放上传的图片，不提交）
 data/notes.json           纸条内容（不提交）
 data/favorites.json       收藏（不提交）
 data/activity.json        星星打开记录（不提交）
@@ -75,12 +80,14 @@ data/wrong-counter.json        敲打统计运行数据（不提交）
 data/wrong-bubbles.json        教育现场气泡文案，管理员可改（不提交）
 data/portal-settings.json      主页公告、卡片覆盖和访客备注（不提交）
 data/portal-activity.json      主页访问与功能打开记录（不提交）
+data/envelopes.json            信封记录内容（不提交）
 test-auth.js               鉴权与主人编辑测试
 test-site-auth.js          访客登录门测试
 test-portal.js             门户与注册表测试
 test-portal-admin.js       主页访问记录和站长管理测试
 test-love-stars.js         七夕功能/API 测试
 test-wrong.js              严格教育现场/API 测试
+test-envelopes.js          信封记录/API 测试
 ```
 
 ## 本地运行
@@ -117,7 +124,7 @@ Public URL: https://...trycloudflare.com
 
 收藏保存在服务器的 `data/favorites.json`。任意设备收藏或取消后，所有在线设备会自动更新；旧浏览器中已有的本地收藏会在首次打开新版网站时迁移一次。
 
-迁移到其他服务器时，请一起保留整个 `data` 文件夹，其中包含纸条、收藏、打开记录、主人设备名单、主页公告与访客备注，以及两个独立功能的留言和敲打统计。
+迁移到其他服务器时，请一起保留整个 `data` 文件夹，其中包含纸条、收藏、打开记录、主人设备名单、主页公告与访客备注，以及各独立功能的留言、敲打统计和信封记录；信封里的图片在 `public/envelopes/uploads/`，也要一起带走。
 
 ## 运行条件
 
