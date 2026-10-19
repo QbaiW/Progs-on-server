@@ -73,7 +73,7 @@ const scene = JSON.parse(sceneRow.data)
 describe('改动前 $scene', sceneRow.data)
 
 scene.name = '森林小屋'
-scene.desc = '林间小岛：松林环绕的山顶小屋，屋旁一堆篝火'
+scene.desc = '林间小岛：松林、一间小屋和一堆篝火'
 scene.model = 'asset://' + forestGlb + '.glb'
 scene.script = 'asset://' + forestJs + '.js'
 scene.props = { ...(scene.props || {}), ...props }

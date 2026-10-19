@@ -1,10 +1,11 @@
 // 森林小屋场景生成器 —— 纯代码，无外部依赖，输出 glTF 2.0 二进制 (.glb)
 //
-// 地形沿用 island-terrain.mjs 的那座小岛（同一份高度场，所以世界坐标、
-// 停泊点、房子落点这些既有结论都不作废），只把「雪顶」换成「森林」：
-// 材质分层改成 沙滩 / 林地 / 灌木土坡 / 山顶草甸，不再有雪。
-// 小屋落在山顶那块近乎水平的台地上（实测 footprint 高差 7 厘米），
-// 一圈松林从半山腰开始，篝火在小屋旁 4.6 米。
+// 地形沿用 island-terrain.mjs 的那座小岛的「岸线」（同一份高度场过一个单调压缩，
+// 海平面映射到海平面，所以海岸形状、世界坐标都不变），但不要那座山：
+// 24 米的山被压成 5 米左右的缓坡台地，全岛都是能走的林地，
+// 材质分层 沙滩 / 林地 / 灌木土坡 / 山顶草甸。
+// 小屋落在最平的地方（压缩后整岛近乎水平，实测 footprint 高差 2 毫米），
+// 一圈松林从沙滩往上开始，篝火在小屋旁 4.6 米。
 //
 // 房子本体单独走 HousTwFl01 蓝图（world2 已上线验证过碰撞与楼梯的同一个 GLB），
 // 这个文件只负责 地形 + 松树 + 篝火石圈。火苗和烟是粒子，在 scene-forest.js。
@@ -21,7 +22,27 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { TERRAIN, heightAt, fbm, slopeDeg } from './island-terrain.mjs'
+import { TERRAIN, heightAt as rawHeightAt, fbm } from './island-terrain.mjs'
+
+// 去掉那座山：把 island-terrain 的高度场做一次单调压缩。
+// tanh 保证 h=0 映射到 0 —— 海平面不动，所以岸线形状、海湾、泻湖位置全部不变，
+// 只是把 24 米的峰压成 5 米的缓坡（最高点 5.5*tanh(24/15) ≈ 5.0 米）。
+// 坡度也按压缩后的高度重算，否则树会按「原来的山」判断陡不陡。
+const LAND_SCALE = 5.5
+const LAND_PIVOT = 15
+
+export function heightAt(x, z) {
+  return LAND_SCALE * Math.tanh(rawHeightAt(x, z) / LAND_PIVOT)
+}
+
+function slopeDeg(x, z, step = 1) {
+  const hl = heightAt(x - step, z)
+  const hr = heightAt(x + step, z)
+  const hd = heightAt(x, z - step)
+  const hu = heightAt(x, z + step)
+  const len = Math.hypot(hl - hr, 2 * step, hd - hu) || 1
+  return (Math.acos(Math.min(1, Math.abs(2 * step) / len)) * 180) / Math.PI
+}
 
 const OUT = process.argv[2] || 'forest.glb'
 const CFG = {
@@ -32,10 +53,11 @@ const CFG = {
   site: path.join(path.dirname(path.resolve(OUT)), 'forest-site.json'),
 }
 
+// 高度范围压缩到约 -2.4 ~ 5.0 米，所以分层阈值跟着重标（对应原来 1.6/19/23.2 的位置）
 const BANDS = [
-  { name: 'Sand', color: [0.78, 0.71, 0.5, 1], test: (h) => h < 1.6 },
-  { name: 'ForestFloor', color: [0.17, 0.3, 0.14, 1], test: (h) => h < 19 },
-  { name: 'Underbrush', color: [0.29, 0.27, 0.17, 1], test: (h) => h < 23.2 },
+  { name: 'Sand', color: [0.78, 0.71, 0.5, 1], test: (h) => h < 0.5 },
+  { name: 'ForestFloor', color: [0.17, 0.3, 0.14, 1], test: (h) => h < 3.3 },
+  { name: 'Underbrush', color: [0.29, 0.27, 0.17, 1], test: (h) => h < 4.6 },
   { name: 'Clearing', color: [0.36, 0.45, 0.23, 1], test: () => true },
 ]
 
@@ -196,22 +218,25 @@ function footprintStats(cx, cz) {
   return { min, max, dev: max - min }
 }
 
-// 小屋要落在山顶那块台地上（林间空地），而不是斜着的林子里。
-// 两遍扫：2 米粗扫定位，再在附近按 0.1 米细化两轴。
+// 小屋要落在林间空地上（不再有山顶，取最平的一块，且尽量靠岛心，
+// 免得贴着沙滩）。两遍扫：2 米粗扫定位，再在附近按 0.1 米细化两轴。
 function scanSite(x0, x1, z0, z1, stepX) {
   let best = null
   for (let x = x0; x <= x1; x += stepX) {
     for (let z = z0; z <= z1; z += stepX) {
       const s = footprintStats(x, z)
-      if (s.max < 21) continue
-      if (!best || s.dev < best.dev) best = { x, z, y: s.max, min: s.min, dev: s.dev }
+      if (s.max < 4.4) continue
+      // 0.002/米 的居中偏好：整岛近乎水平时高差只有几毫米，
+      // 没有这一项会挑到离岸最近的第一个候选点
+      const score = s.dev + 0.002 * Math.hypot(x, z)
+      if (!best || score < best.score) best = { x, z, y: s.max, min: s.min, dev: s.dev, score }
     }
   }
   return best
 }
 
 let cabin = scanSite(-40, 40, -40, 40, 1)
-if (!cabin) throw new Error('找不到山顶台地')
+if (!cabin) throw new Error('找不到足够平的林地')
 {
   const coarse = cabin
   const fx = scanSite(coarse.x - 1, coarse.x + 1, coarse.z, coarse.z, 0.1)
@@ -249,7 +274,8 @@ for (let gx = -150; gx <= 150; gx += TREE_STEP) {
     const jx = gx + (HASH(gx, gz) - 0.5) * TREE_STEP * 0.9
     const jz = gz + (HASH(gz, gx) - 0.5) * TREE_STEP * 0.9
     const h = heightAt(jx, jz)
-    if (h < 2.0 || h > 20) continue
+    // 只躲开沙滩和水：原来「2 米以上、20 米以下」是躲山顶，现在没有山顶了
+    if (h < 0.9) continue
     if (slopeDeg(jx, jz) > 32) continue
     // 小屋周围 13 米、篝火周围 6.5 米留空
     if (near(jx, jz, cabin.x, cabin.z, 13) || near(jx, jz, fire.x, fire.z, 6.5)) continue
