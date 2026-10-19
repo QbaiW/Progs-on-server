@@ -81,6 +81,17 @@ const MATS = [
   { name: 'Roof', color: [0.40, 0.17, 0.13, 1], rough: 0.90, metal: 0 },
   { name: 'Stone', color: [0.36, 0.35, 0.34, 1], rough: 0.95, metal: 0 },
   { name: 'Glass', color: [0.60, 0.78, 0.88, 0.32], rough: 0.05, metal: 0, alpha: 'BLEND' },
+  // 装修用的材质：Deck 是晒褪色的旧木、Trim 是深色窗套、Iron 是铁件
+  { name: 'Deck', color: [0.56, 0.42, 0.28, 1], rough: 0.92, metal: 0 },
+  { name: 'Trim', color: [0.25, 0.17, 0.12, 1], rough: 0.80, metal: 0 },
+  { name: 'Iron', color: [0.17, 0.17, 0.18, 1], rough: 0.55, metal: 0.7 },
+  { name: 'Linen', color: [0.90, 0.87, 0.79, 1], rough: 0.95, metal: 0 },
+  { name: 'Rug', color: [0.52, 0.19, 0.16, 1], rough: 1.0, metal: 0 },
+  { name: 'Leaf', color: [0.22, 0.44, 0.20, 1], rough: 0.90, metal: 0 },
+  { name: 'Flower', color: [0.93, 0.58, 0.72, 1], rough: 0.85, metal: 0 },
+  // 自发光：屋里的灯和炉火。Hyperfy 没有 light 节点，能亮的只有 emissive。
+  { name: 'Lamp', color: [1.0, 0.80, 0.45, 1], rough: 0.35, metal: 0, emissive: [1.0, 0.62, 0.22] },
+  { name: 'Ember', color: [0.85, 0.30, 0.10, 1], rough: 0.9, metal: 0, emissive: [1.0, 0.26, 0.04] },
 ]
 const MI = Object.fromEntries(MATS.map((m, i) => [m.name, i]))
 
@@ -229,8 +240,7 @@ addBox(-P.HX - 0.15, -P.PLINTH, -P.HZ - 0.15, P.HX + 0.15, -0.30, P.HZ + 0.15, '
 addBox(-P.HX, -0.30, -P.HZ, P.HX, 0.00, P.HZ, 'Stone')
 addBox(IX0, 0.00, IZ0, IX1, 0.02, IZ1, 'Floor')
 
-// --- 门口的石头门廊 ---
-addBox(-0.95, -0.55, -P.HZ - 1.05, 0.95, 0.00, -P.HZ, 'Stone')
+// --- 门口的石头门廊交给下面的木门廊（装修段），这里不再铺石板 ---
 
 // --- 一层四面墙 ---
 // 企口：Z 向墙通长，X 向墙缩进两侧墙厚，角上不产生共面重叠面
@@ -244,8 +254,8 @@ const wZplus = addWall('z', P.HZ - P.T, P.HZ, -P.HX, P.HX, 0, EAVE,
   [{ e0: -0.90, e1: 0.90, y0: f1WindowY[0], y1: f1WindowY[1] },
    { e0: -0.90, e1: 0.90, y0: 3.90, y1: 5.00 }], 'Wall')
 const wXminus = addWall('x', -P.HX, -P.HX + P.T, IZ0, IZ1, 0, EAVE,
-  [{ e0: -0.75, e1: 0.75, y0: f1WindowY[0], y1: f1WindowY[1] },
-   { e0: -0.75, e1: 0.75, y0: f2WindowY[0], y1: f2WindowY[1] }], 'Wall')
+  [{ e0: 0.25, e1: 1.45, y0: f1WindowY[0], y1: f1WindowY[1] },
+   { e0: 0.30, e1: 1.50, y0: f2WindowY[0], y1: f2WindowY[1] }], 'Wall')
 const wXplus = addWall('x', P.HX - P.T, P.HX, IZ0, IZ1, 0, EAVE,
   [{ e0: -0.90, e1: 0.90, y0: f2WindowY[0], y1: f2WindowY[1] }], 'Wall')
 
@@ -294,9 +304,9 @@ for (const sgn of [1, -1]) {
 }
 addBox(-(P.HX + P.OVER), RIDGE - 0.05, -0.11, P.HX + P.OVER, RIDGE + 0.02, 0.11, 'Roof')
 
-// --- 烟囱（挂在房子外侧，不占室内，也就不挡楼梯） ---
-addBox(P.HX - 0.05, -0.40, -0.45, P.HX + 0.45, RIDGE + 0.65, 0.35, 'Stone')
-addBox(P.HX - 0.12, RIDGE + 0.65, -0.52, P.HX + 0.52, RIDGE + 0.80, 0.42, 'Stone')
+// --- 烟囱：挪到 -X 侧，跟一层的壁炉对齐（原来挂在 +X 侧，那里现在是楼梯） ---
+addBox(-P.HX - 0.46, -0.40, -1.70, -P.HX + 0.06, RIDGE + 0.55, -0.30, 'Stone')
+addBox(-P.HX - 0.54, RIDGE + 0.55, -1.78, -P.HX + 0.12, RIDGE + 0.70, -0.22, 'Stone')
 
 // --- 窗玻璃 + 窗台 ---
 // 玻璃放在墙厚正中；窗台是块木板，不参与碰撞（否则门口/窗边会绊脚）
@@ -318,8 +328,8 @@ const xcPlus = P.HX - P.T / 2
 addGlassZ(zcMinus, -0.95, 0.95, 3.95, 5.05, -P.HZ)   // 正面二层
 addGlassZ(zcPlus, -0.90, 0.90, f1WindowY[0], f1WindowY[1], P.HZ - P.T)  // 背面一层
 addGlassZ(zcPlus, -0.90, 0.90, 3.90, 5.00, P.HZ - P.T)                  // 背面二层
-addGlassX(xcMinus, -0.75, 0.75, f1WindowY[0], f1WindowY[1])             // 左侧一层
-addGlassX(xcMinus, -0.75, 0.75, f2WindowY[0], f2WindowY[1])             // 左侧二层
+addGlassX(xcMinus, 0.25, 1.45, f1WindowY[0], f1WindowY[1])              // 左侧一层
+addGlassX(xcMinus, 0.30, 1.50, f2WindowY[0], f2WindowY[1])              // 左侧二层
 addGlassX(xcPlus, -0.90, 0.90, f2WindowY[0], f2WindowY[1])              // 右侧二层（楼梯上方）
 stats.窗玻璃 = 6
 
@@ -327,6 +337,252 @@ stats.窗玻璃 = 6
 addBox(-0.62, 0.00, -P.HZ - 0.03, -0.55, 2.10, -P.HZ + P.T + 0.03, 'Wood', false)
 addBox(0.55, 0.00, -P.HZ - 0.03, 0.62, 2.10, -P.HZ + P.T + 0.03, 'Wood', false)
 addBox(-0.62, 2.10, -P.HZ - 0.03, 0.62, 2.18, -P.HZ + P.T + 0.03, 'Wood', false)
+
+// ============================================================================
+// 装修：门廊 / 外墙细节 / 两层内饰
+//
+// 装饰一律 solid = false —— 只看得见、不参与碰撞。两个原因：
+//   1) 碰撞体只有一个 primitive 的三角网格，家具那些碎面能把它撑大好几倍，
+//      而 PhysX 的三角网格是逐三角求交的，代价全落在玩家每一步上；
+//   2) 真给桌椅做碰撞，效果只有「人卡在桌腿上」。
+// 唯一参与碰撞的装饰是门廊地板和两根廊柱：人要站得上去，柱子要挡得住。
+// ============================================================================
+const F1Y = 0.02                 // 一层地面面层顶
+const F2Y = Y2 + 0.02            // 二层地面面层顶
+
+// ---------------- 门廊 ----------------
+const DECK = { x0: -1.90, x1: 1.90, z0: -P.HZ - 2.00, z1: -P.HZ, top: F1Y, th: 0.16 }
+// 铺板：一条条木板，板间留 3 厘米缝。缝只有 3 厘米，人脚踩不过去，纯视觉
+for (let bx = DECK.x0; bx < DECK.x1 - 1e-6; bx += 0.20) {
+  addBox(bx, DECK.top - DECK.th, DECK.z0, Math.min(bx + 0.17, DECK.x1), DECK.top, DECK.z1, 'Deck')
+}
+// 前缘封边
+addBox(DECK.x0 - 0.06, DECK.top - 0.20, DECK.z0 - 0.06, DECK.x1 + 0.06, DECK.top + 0.004, DECK.z0, 'Trim', false)
+// 两根廊柱（参与碰撞，撑住门廊顶）
+for (const px of [-1.78, 1.78]) {
+  addBox(px - 0.09, -0.16, -4.06, px + 0.09, 2.58, -3.88, 'Wood')
+}
+// 门廊顶：向 -Z 方向下倾 8° 的小坡顶
+addRotBoxX(0, 2.72, -3.40, 4.10, 0.10, 2.20, -0.14, 'Roof', false)
+addBox(-2.06, 2.53, -4.54, 2.06, 2.62, -4.42, 'Trim', false)
+// 栏杆：前缘中间留 1.2 米上落口
+const RAIL_Y = 1.00
+for (const [x0, x1] of [[-1.75, -0.62], [0.62, 1.75]]) {
+  addBox(x0, RAIL_Y, -4.02, x1, RAIL_Y + 0.06, -3.94, 'Deck', false)
+  for (let x = x0 + 0.20; x < x1 - 0.12; x += 0.38) {
+    addBox(x, DECK.top, -4.00, x + 0.05, RAIL_Y, -3.96, 'Deck', false)
+  }
+}
+for (const px of [-1.81, 1.81]) {
+  addBox(px - 0.03, RAIL_Y, -3.90, px + 0.03, RAIL_Y + 0.06, -2.30, 'Deck', false)
+  for (let z = -3.76; z < -2.36; z += 0.38) {
+    addBox(px - 0.025, DECK.top, z, px + 0.025, RAIL_Y, z + 0.05, 'Deck', false)
+  }
+}
+// 门廊上的长凳（朝屋里）
+addBox(-1.70, 0.42, -3.86, -0.78, 0.48, -3.44, 'Deck', false)
+for (const px of [-1.64, -0.84]) {
+  addBox(px, DECK.top, -3.82, px + 0.07, 0.42, -3.74, 'Wood', false)
+}
+addBox(-1.70, 0.48, -3.94, -0.78, 1.00, -3.86, 'Deck', false)
+// 花盆两只
+for (const px of [-1.52, 1.52]) {
+  addBox(px - 0.16, DECK.top, -4.02, px + 0.16, 0.34, -3.70, 'Wood', false)
+  addBox(px - 0.20, 0.34, -4.06, px + 0.20, 0.66, -3.66, 'Leaf', false)
+  addBox(px - 0.10, 0.66, -3.96, px + 0.06, 0.78, -3.80, 'Flower', false)
+  addBox(px + 0.02, 0.66, -3.86, px + 0.16, 0.82, -3.72, 'Flower', false)
+}
+// 灯：门旁一盏，门廊顶下一盏（Hyperfy 没有灯，只能靠自发光材质）
+addBox(0.74, 1.60, -2.31, 0.80, 1.66, -2.05, 'Iron', false)
+addBox(0.62, 1.66, -2.34, 0.92, 1.96, -2.04, 'Lamp', false)
+addBox(0.60, 1.96, -2.35, 0.94, 2.02, -2.03, 'Iron', false)
+addBox(-0.72, 2.30, -3.06, -0.68, 2.62, -3.02, 'Iron', false)
+addBox(-0.86, 2.08, -3.20, -0.54, 2.30, -2.88, 'Lamp', false)
+addBox(-0.89, 2.30, -3.23, -0.51, 2.34, -2.85, 'Iron', false)
+// 从门廊往外的小石板路
+for (let i = 0; i < 5; i++) {
+  const z = -4.62 - i * 0.78
+  const odd = i % 2
+  const cx = odd ? 0.10 : -0.06
+  const w = 0.62 + odd * 0.10
+  addBox(cx - w / 2, -0.02, z - 0.30, cx + w / 2, 0.05, z + 0.30, 'Stone', false)
+}
+
+// ---------------- 外墙细节 ----------------
+// 护窗板：每扇窗子两侧各一块深色木板
+function shuttersZ(dir, zOuter, x0, x1, y0, y1) {
+  const za = dir > 0 ? zOuter : zOuter - 0.06
+  const zb = dir > 0 ? zOuter + 0.06 : zOuter
+  addBox(x0 - 0.30, y0, za, x0, y1, zb, 'Trim', false)
+  addBox(x1, y0, za, x1 + 0.30, y1, zb, 'Trim', false)
+}
+function shuttersX(dir, xOuter, z0, z1, y0, y1) {
+  const xa = dir > 0 ? xOuter : xOuter - 0.06
+  const xb = dir > 0 ? xOuter + 0.06 : xOuter
+  addBox(xa, y0, z0 - 0.30, xb, y1, z0, 'Trim', false)
+  addBox(xa, y0, z1, xb, y1, z1 + 0.30, 'Trim', false)
+}
+shuttersZ(-1, -P.HZ, -0.95, 0.95, 3.95, 5.05)   // 正面二层
+shuttersZ(1, P.HZ, -0.90, 0.90, 0.95, 2.05)     // 背面一层
+shuttersZ(1, P.HZ, -0.90, 0.90, 3.90, 5.00)     // 背面二层
+shuttersX(-1, -P.HX, 0.25, 1.45, 0.95, 2.05)    // 左侧一层（壁炉让位，挪到 +Z 半）
+shuttersX(-1, -P.HX, 0.30, 1.50, 3.95, 5.05)    // 左侧二层
+shuttersX(1, P.HX, -0.90, 0.90, 3.95, 5.05)     // 右侧二层
+stats.护窗板 = 12
+
+// 窗台花箱（两扇一层窗）
+for (const [side, a0, a1] of [['+Z', -1.00, 1.00], ['-X', 0.20, 1.50]]) {
+  if (side === '+Z') {
+    addBox(a0, 0.66, P.HZ, a1, 0.92, P.HZ + 0.24, 'Trim', false)
+    addBox(a0 + 0.04, 0.92, P.HZ + 0.01, a1 - 0.04, 1.02, P.HZ + 0.22, 'Leaf', false)
+    for (let i = 0; i < 7; i++) {
+      const x = a0 + 0.10 + i * 0.26
+      addBox(x - 0.06, 1.02, P.HZ + 0.07, x + 0.06, 1.13, P.HZ + 0.19, 'Flower', false)
+    }
+  } else {
+    addBox(-P.HX - 0.24, 0.66, a0, -P.HX, 0.92, a1, 'Trim', false)
+    addBox(-P.HX - 0.22, 0.92, a0 + 0.04, -P.HX - 0.01, 1.02, a1 - 0.04, 'Leaf', false)
+    for (let i = 0; i < 5; i++) {
+      const z = a0 + 0.10 + i * 0.26
+      addBox(-P.HX - 0.19, 1.02, z - 0.06, -P.HX - 0.07, 1.13, z + 0.06, 'Flower', false)
+    }
+  }
+}
+
+// 地基四周贴一圈乱石（高低不一，纯装饰）
+let bandSeed = 7
+const rndBand = () => {
+  bandSeed = (bandSeed * 16807) % 2147483647
+  return bandSeed / 2147483647
+}
+for (let x = -P.HX - 0.15; x < P.HX + 0.10; x += 0.52) {
+  for (const [z0, z1] of [[-P.HZ - 0.23, -P.HZ - 0.14], [P.HZ + 0.14, P.HZ + 0.23]]) {
+    const h = 0.10 + rndBand() * 0.09
+    addBox(x + 0.02, -0.34 - h, z0, Math.min(x + 0.48, P.HX + 0.15), -0.05, z1, 'Stone', false)
+  }
+}
+for (let z = -P.HZ; z < P.HZ - 0.2; z += 0.50) {
+  for (const [x0, x1] of [[-P.HX - 0.23, -P.HX - 0.14], [P.HX + 0.14, P.HX + 0.23]]) {
+    const h = 0.10 + rndBand() * 0.09
+    addBox(x0, -0.34 - h, z + 0.02, x1, -0.05, Math.min(z + 0.46, P.HZ), 'Stone', false)
+  }
+}
+
+// 墙根的柴火堆
+for (let row = 0; row < 4; row++) {
+  for (let i = 0; i < 4; i++) {
+    const z = -0.58 + i * 0.20
+    const y = F1Y + row * 0.12
+    addBox(P.HX + 0.05, y, z, P.HX + 0.80, y + 0.10, z + 0.16, 'Wood', false)
+  }
+}
+addBox(P.HX + 0.02, F1Y, -0.66, P.HX + 0.84, F1Y + 0.58, -0.62, 'Trim', false)   // 柴堆背后的挡板
+addBox(P.HX + 0.02, F1Y, 0.22, P.HX + 0.84, F1Y + 0.46, 0.26, 'Trim', false)
+
+// 开着的门扇（向屋里开，贴在 -X 侧门框上）
+addBox(-0.61, F1Y, -2.07, -0.55, 2.06, -1.12, 'Wood', false)
+addBox(-0.63, 0.98, -1.34, -0.54, 1.05, -1.20, 'Iron', false)
+addBox(-0.61, 1.55, -2.00, -0.56, 2.02, -1.18, 'Glass', false)                  // 门上的玻璃
+
+// ---------------- 一层内饰 ----------------
+// 地毯
+addBox(-2.40, F1Y + 0.004, -0.20, 0.60, F1Y + 0.014, 1.50, 'Rug', false)
+// 壁炉（贴着 -X 墙，烟囱在墙外同一个位置）
+addBox(-2.82, F1Y, -1.95, -2.28, F1Y + 0.08, -0.02, 'Stone', false)             // 炉前石板
+addBox(-2.82, F1Y + 0.08, -1.78, -2.26, 1.34, -1.38, 'Stone', false)            // 左立柱
+addBox(-2.82, F1Y + 0.08, -0.42, -2.26, 1.34, -0.02, 'Stone', false)            // 右立柱
+addBox(-2.82, F1Y + 0.08, -1.38, -2.70, 1.34, -0.42, 'Iron', false)             // 炉膛背板
+addBox(-2.82, 1.34, -1.78, -2.24, 1.46, -0.02, 'Stone', false)                  // 炉楣
+addBox(-2.82, 1.46, -1.84, -2.16, 1.53, 0.04, 'Wood', false)                    // 壁炉台面
+addBox(-2.82, 1.53, -1.62, -2.56, 2.70, -0.18, 'Stone', false)                  // 炉膛上方的烟道墙
+addBox(-2.78, F1Y + 0.08, -1.26, -2.60, F1Y + 0.22, -0.55, 'Wood', false)       // 柴
+addBox(-2.77, F1Y + 0.08, -1.22, -2.62, F1Y + 0.36, -0.60, 'Ember', false)      // 炭火（自发光）
+addBox(-2.74, F1Y + 0.06, -1.16, -2.66, F1Y + 0.52, -0.66, 'Ember', false)      // 火苗
+addBox(-2.60, 1.53, -1.50, -2.30, 1.66, -1.20, 'Iron', false)                   // 炉台上的一口锅
+// 壁炉台上的小摆件
+addBox(-2.78, 1.53, -0.70, -2.66, 1.78, -0.58, 'Lamp', false)                   // 蜡烛
+addBox(-2.80, 1.53, -0.32, -2.60, 1.86, -0.10, 'Leaf', false)                   // 一盆小绿植
+// 柴筐
+addBox(-2.82, F1Y + 0.06, 1.00, -2.44, F1Y + 0.44, 1.44, 'Wood', false)
+addBox(-2.80, F1Y + 0.44, 1.04, -2.48, F1Y + 0.54, 1.40, 'Wood', false)
+// 餐桌 + 两把椅子
+addBox(-1.75, 0.72, 0.30, -0.55, 0.79, 1.10, 'Wood', false)                     // 桌面
+for (const [lx, lz] of [[-1.67, 0.38], [-0.63, 0.38], [-1.67, 1.02], [-0.63, 1.02]]) {
+  addBox(lx, F1Y, lz, lx + 0.07, 0.72, lz + 0.07, 'Wood', false)
+}
+addBox(-1.42, 0.79, 0.62, -1.20, 0.95, 0.80, 'Iron', false)                     // 桌上的罐子
+addBox(-1.45, 0.79, 0.98, -1.30, 0.83, 1.04, 'Deck', false)                     // 一本书
+for (const [cz, backZ] of [[-0.06, -0.12], [1.44, 1.46]]) {
+  addBox(-1.45, 0.42, cz, -0.98, 0.48, cz + 0.36, 'Wood', false)                // 座面
+  for (const [lx, lz] of [[-1.43, cz + 0.02], [-1.02, cz + 0.02], [-1.43, cz + 0.30], [-1.02, cz + 0.30]]) {
+    addBox(lx, F1Y, lz, lx + 0.05, 0.42, lz + 0.05, 'Wood', false)
+  }
+  addBox(-1.44, 0.48, backZ, -0.99, 1.02, backZ + 0.06, 'Wood', false)          // 靠背
+}
+// 厨房操作台（贴 +Z 墙）
+addBox(-2.60, F1Y + 0.04, 1.62, -0.95, 0.90, 2.07, 'Deck', false)               // 柜体
+addBox(-2.66, 0.90, 1.56, -0.89, 0.97, 2.07, 'Wood', false)                     // 台面
+addBox(-2.32, 0.70, 1.58, -2.26, 0.76, 1.62, 'Iron', false)                     // 柜门把手
+addBox(-1.62, 0.70, 1.58, -1.56, 0.76, 1.62, 'Iron', false)
+addBox(-2.42, 0.97, 1.68, -2.24, 1.22, 1.88, 'Glass', false)                    // 罐子三只
+addBox(-2.12, 0.97, 1.70, -1.98, 1.14, 1.86, 'Iron', false)
+addBox(-1.82, 0.97, 1.70, -1.70, 1.10, 1.82, 'Glass', false)
+addBox(-2.60, 1.72, 1.90, -1.00, 1.78, 2.07, 'Deck', false)                     // 墙上隔板
+for (let i = 0; i < 5; i++) {
+  addBox(-2.52 + i * 0.30, 1.78, 1.92, -2.38 + i * 0.30, 1.78 + 0.18 + (i % 2) * 0.04, 2.04, i % 2 ? 'Rug' : 'Leaf', false)
+}
+// 吊灯
+addBox(-0.72, 2.42, 0.68, -0.68, 2.70, 0.72, 'Iron', false)
+addBox(-0.84, 2.20, 0.56, -0.56, 2.42, 0.84, 'Lamp', false)
+addBox(-0.87, 2.42, 0.53, -0.53, 2.46, 0.87, 'Iron', false)
+// 门边的挂钩
+for (const hx of [-1.72, -1.44, -1.16]) {
+  addBox(hx, 1.56, -2.07, hx + 0.05, 1.61, -1.96, 'Iron', false)
+}
+
+// ---------------- 二层内饰 ----------------
+addBox(-2.20, F2Y + 0.004, -0.60, 0.60, F2Y + 0.014, 1.20, 'Rug', false)        // 地毯
+// 床（床头贴 -X 墙）
+addBox(-2.82, F2Y + 0.02, -1.50, -2.76, 3.80, 0.00, 'Wood', false)              // 床头板
+addBox(-2.76, F2Y + 0.02, -1.45, -0.85, 3.20, -0.05, 'Wood', false)             // 床架
+addBox(-2.74, 3.20, -1.42, -0.88, 3.42, -0.08, 'Linen', false)                  // 床垫
+addBox(-2.72, 3.42, -1.30, -2.42, 3.53, -0.20, 'Linen', false)                  // 枕头
+addBox(-2.30, 3.42, -1.41, -0.89, 3.48, -0.09, 'Rug', false)                    // 被子
+// 床头柜 + 台灯
+addBox(-2.82, F2Y + 0.02, 0.10, -2.44, 3.44, 0.48, 'Wood', false)
+addBox(-2.74, 3.44, 0.18, -2.54, 3.52, 0.40, 'Iron', false)
+addBox(-2.77, 3.52, 0.15, -2.51, 3.76, 0.43, 'Lamp', false)
+// 储物箱
+addBox(-1.95, F2Y + 0.02, 1.58, -1.00, 3.42, 2.05, 'Wood', false)
+addBox(-1.98, 3.42, 1.55, -0.97, 3.50, 2.07, 'Trim', false)
+addBox(-1.80, F2Y + 0.02, 1.57, -1.74, 3.44, 2.06, 'Iron', false)
+addBox(-1.24, F2Y + 0.02, 1.57, -1.18, 3.44, 2.06, 'Iron', false)
+// 书桌 + 椅子（对着后窗）
+addBox(0.95, 3.70, 1.58, 1.95, 3.78, 2.05, 'Wood', false)
+for (const [lx, lz] of [[1.00, 1.62], [1.84, 1.62], [1.00, 1.96], [1.84, 1.96]]) {
+  addBox(lx, F2Y + 0.02, lz, lx + 0.07, 3.70, lz + 0.07, 'Wood', false)
+}
+addBox(1.20, 3.78, 1.70, 1.42, 3.84, 1.88, 'Deck', false)                       // 桌上摊开的书
+addBox(1.60, 3.78, 1.72, 1.72, 3.96, 1.84, 'Lamp', false)                       // 桌上蜡烛
+addBox(1.15, 3.42, 1.10, 1.55, 3.48, 1.46, 'Wood', false)                       // 椅子座面
+for (const [lx, lz] of [[1.17, 1.12], [1.49, 1.12], [1.17, 1.40], [1.49, 1.40]]) {
+  addBox(lx, F2Y + 0.02, lz, lx + 0.05, 3.42, lz + 0.05, 'Wood', false)
+}
+addBox(1.14, 3.48, 1.40, 1.56, 4.00, 1.46, 'Wood', false)                       // 靠背
+// 墙上的书架（背墙左半，避开正面那扇窗）
+addBox(-2.60, 3.60, -2.07, -1.10, 3.66, -1.90, 'Deck', false)
+for (const bx of [-2.55, -1.20]) {
+  addBox(bx, 3.52, -2.07, bx + 0.06, 3.60, -1.96, 'Deck', false)                // 支架
+}
+for (let i = 0; i < 6; i++) {
+  addBox(-2.52 + i * 0.26, 3.66, -2.03, -2.40 + i * 0.26, 3.86 + (i % 3) * 0.03, -1.92,
+    ['Rug', 'Leaf', 'Deck', 'Iron', 'Flower', 'Wood'][i], false)
+}
+// 角上的盆栽
+addBox(1.52, F2Y + 0.02, 1.62, 1.86, 3.24, 1.96, 'Wood', false)
+addBox(1.46, 3.24, 1.56, 1.92, 3.62, 2.02, 'Leaf', false)
+addBox(1.52, 3.62, 1.62, 1.86, 3.86, 1.96, 'Leaf', false)
+
 
 // ============================================================================
 // 组装 GLB
@@ -439,6 +695,9 @@ const materials = MATS.map((m) => {
     },
   }
   if (m.alpha) mat.alphaMode = m.alpha
+  // 自发光：Hyperfy 没有 light 节点，屋里的灯只能靠这个亮。不超过 1.0，
+  // 这样不用 KHR_materials_emissive_strength 扩展（文件里还是零扩展）。
+  if (m.emissive) mat.emissiveFactor = m.emissive
   return mat
 })
 
