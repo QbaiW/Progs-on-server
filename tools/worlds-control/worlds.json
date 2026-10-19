@@ -1,7 +1,7 @@
 [
   {
     "name": "hyperfy",
-    "label": "雪顶小岛",
+    "label": "森林小屋",
     "port": 3001,
     "dir": "/www/wwwroot/hyperfy",
     "world": "world",

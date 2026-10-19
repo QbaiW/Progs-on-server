@@ -94,6 +94,34 @@ for (const p of gltf.meshes[0].primitives) {
   }
 }
 
+// ---- 场景/子节点引用检查 ----
+// 少写一位（scenes[0].nodes 指向不存在的下标）时，Hyperfy 的 GLTFLoader 只会报
+// "Cannot read properties of undefined (reading 'name')"，然后整个世界黑屏。
+for (const sc of gltf.scenes || []) {
+  for (const n of sc.nodes || []) {
+    if (!gltf.nodes[n]) problems.push(`scene "${sc.name}" 引用了不存在的节点 ${n}（nodes 共 ${gltf.nodes.length} 个）`)
+  }
+}
+for (const n of gltf.nodes || []) {
+  for (const c of n.children || []) {
+    if (!gltf.nodes[c]) problems.push(`节点 "${n.name}" 的 children 引用了不存在的节点 ${c}`)
+  }
+}
+
+// ---- 每个 primitive 的索引都要落在自己的 POSITION 顶点数内 ----
+// 上面只查了 mesh[0]；分顶点缓冲的模型（地形 + 植被）各自有上限。
+for (const m of gltf.meshes) {
+  for (const p of m.primitives) {
+    const ia = gltf.accessors[p.indices]
+    const ibv = gltf.bufferViews[ia.bufferView]
+    const u16 = new Uint16Array(bin.buffer, bin.byteOffset + ibv.byteOffset, ia.count)
+    let max = -1
+    for (const v of u16) if (v > max) max = v
+    const bound = gltf.accessors[p.attributes.POSITION].count
+    if (max >= bound) problems.push(`mesh "${m.name}" 的索引 ${max} 超出顶点数 ${bound}`)
+  }
+}
+
 const report = {
   文件: file,
   大小: (buf.length / 1048576).toFixed(2) + ' MB',
