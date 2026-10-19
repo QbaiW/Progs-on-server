@@ -80,18 +80,17 @@ for (let i = 0; i < posData.length; i++) {
 }
 if (!finite) problems.push('POSITION 中存在非有限数值')
 
-// ---- 索引越界检查 ----
+// ---- 索引统计 ----
+// 越界检查在下面「每个 primitive 自己的顶点数」里做：mesh[0] 若按材质分成多个
+// primitive，每个 primitive 都有自己的 POSITION，拿第一个的顶点数去比别人的索引
+// 只会得到假报错（房子有 15 个 primitive，就在这儿误报过一次）。
 let idxMax = -1, idxMin = Infinity, triCount = 0
-for (const p of gltf.meshes[0].primitives) {
+for (const m of gltf.meshes) for (const p of m.primitives) {
   const ia = gltf.accessors[p.indices]
   const ibv = gltf.bufferViews[ia.bufferView]
   const u16 = new Uint16Array(bin.buffer, bin.byteOffset + ibv.byteOffset, ia.count)
   for (const v of u16) { if (v > idxMax) idxMax = v; if (v < idxMin) idxMin = v }
   triCount += ia.count / 3
-  if (idxMax >= gltf.accessors[posAccIdx].count) {
-    problems.push(`索引 ${idxMax} 超出顶点数 ${gltf.accessors[posAccIdx].count}`)
-    break
-  }
 }
 
 // ---- 场景/子节点引用检查 ----
@@ -131,7 +130,7 @@ const report = {
   网格: gltf.meshes.map((m, i) => `mesh[${i}] ${m.name} primitives=${m.primitives.length}`),
   材质: gltf.materials.map((m) => m.name),
   地形三角形: triCount,
-  顶点数: gltf.accessors[posAccIdx].count,
+  顶点数: Math.max(...gltf.meshes.flatMap((m) => m.primitives.map((p) => gltf.accessors[p.attributes.POSITION].count))),
   高度实测: `${yMin.toFixed(2)} ~ ${yMax.toFixed(2)}`,
   索引范围: `${idxMin} ~ ${idxMax}`,
   扩展: used.length ? used : '无',

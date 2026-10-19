@@ -91,9 +91,9 @@ const houseData = JSON.parse(houseBpRow.data)
 // 蓝图 data 里的 id 保持 HousTwFl01（世界二已经这么存的）
 houseData.id = 'HousTwFl01'
 
-// 出生点：小屋前 7 米，朝向小屋
+// 出生点：门廊前 8.5 米，朝向小屋（门廊和门在 -Z 一侧，别把人丢在屋后）
 const spawn = {
-  position: [+(cx + 1.5).toFixed(3), +(cy + 1.9).toFixed(3), +(cz + 7).toFixed(3)],
+  position: [+(cx + 0.9).toFixed(3), +(cy + 1.9).toFixed(3), +(cz - 8.5).toFixed(3)],
   quaternion: [0, 0, 0, 1],
 }
 {
