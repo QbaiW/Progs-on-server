@@ -111,6 +111,36 @@ bufferView/accessor，只用 `node:fs` / `node:path` 落文件。three 与 canno
   按深度裁掉深水区能再省数万面。
 - 松树 17,820 面 / 594 棵 = 30 面一棵，小屋 4,192 面：都不是瓶颈。
 
+## 服务器运行数据（2026-10-20 15:00 实测）
+
+机器：2 vCPU / 1870 MB 内存 / 40 GB 磁盘（已用 12 G，30%）/ Aliyun Linux 8 (kernel 5.10) /
+Node v22.23.2，已连续运行 64 天。
+
+| pm2 进程 | 端口 | 常驻内存 | 占内存 | 重启次数 | 本次已运行 |
+| --- | --- | --- | --- | --- | --- |
+| `hyperfy`（世界一） | 3001 | 329 MB | 17.5% | 27 | 17.5 h |
+| `hyperfy-world2`（世界二） | 3002 | 263 MB | 14.0% | 1 | 17.5 h |
+| `qe-star-bottle`（小铺） | 8787 | 73 MB | 3.8% | 51 | 部署后刚重启 |
+| `worlds-panel`（管理台） | 8791 | 70 MB | 3.7% | 4 | 18.1 h |
+
+系统面：load average `0.01 / 0.05 / 0.05`（2 核基本空闲），内存 used 1105 MB / available 765 MB，
+**swap 已用 320 MB**（内存偏紧的唯一信号），磁盘 27 G 空闲。四个 node 进程合计约 735 MB。
+
+重启次数是我们自己部署的次数，不是崩溃：世界一 27 次 = 每次换地形/换房子都 `pm2 restart hyperfy`。
+
+其它监听端口都不是这套东西的：80/443（Nginx）、888（宝塔）、3306（MySQL）、3000（历史遗留）、22（ssh）。
+
+复测（远端命令别带 `|` 和双引号，Windows 的 ssh 会把它们吃掉）：
+
+```bash
+ssh root@47.108.215.236 'free -m; uptime; cat /proc/loadavg; df -h /'
+ssh root@47.108.215.236 'pm2 jlist' > pm2.json    # 拿回本地解析 restart_time / monit.memory
+```
+
+**加第三个世界之前先看这条内存水位**：一个 Hyperfy 世界常驻约 260–330 MB，小铺 + 管理台约 145 MB，
+加上 MySQL、宝塔和阿里云 agent，现在只剩 765 MB 可用。世界管理面板的 `PANEL_MIN_FREE_MB=250` /
+`PER_WORLD_MB=380` 两道闸就是为这件事设的——别为了绕过 409 去改小它们。
+
 ## 加一个新资产的标准流程
 
 1. 写生成器：`import { createMeshBuilder } from './mesh-builder.mjs'`，用 `addBox` / `addQuad` 之类组装，
