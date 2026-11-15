@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>价格标尺 · 拖动看看</title>
+<style>
+  :root{
+    --ink:#141414;
+    --sub:#8b8880;
+    --bar:#cfccc5;
+    --bar-strong:#a8a39a;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:radial-gradient(120% 90% at 50% 0%,#fff 0%,#f6f4f1 55%,#efece7 100%);
+    color:var(--ink);
+    font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    display:flex;align-items:center;justify-content:center;
+    min-height:100dvh;
+    padding:24px 16px max(24px,env(safe-area-inset-bottom));
+  }
+  .app{width:min(100%,720px);display:flex;flex-direction:column;align-items:center}
+
+  /* ---------- 顶部 360×360 白色方框 ---------- */
+  .card{
+    width:min(360px,88vw);
+    aspect-ratio:1/1;
+    background:#fff;
+    border-radius:26px;
+    box-shadow:0 24px 60px -30px rgba(30,25,20,.35),0 2px 10px rgba(30,25,20,.05);
+    display:grid;place-items:center;
+    overflow:hidden;
+  }
+  .inner{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:26px;text-align:center}
+  .art{font-size:clamp(64px,21vw,92px);line-height:1;animation:float 5s ease-in-out infinite}
+  .art:has(img){line-height:0}
+  .art img{
+    width:clamp(130px,40vw,180px);aspect-ratio:1;object-fit:cover;display:block;
+    border-radius:20px;
+    box-shadow:0 10px 26px -16px rgba(30,25,20,.55), inset 0 0 0 1px rgba(20,16,12,.07);
+  }
+  @keyframes float{0%,100%{transform:translateY(-3px)}50%{transform:translateY(5px)}}
+  .price{margin:0;font-size:clamp(30px,8.4vw,40px);font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  .name{margin:0;color:var(--sub);font-size:clamp(14px,3.8vw,16px);letter-spacing:.05em}
+  /* 切换：淡入 + 回弹（duang） */
+  .card.swap .inner{animation:swap .36s ease-out both}
+  @keyframes swap{
+    0%{opacity:0;transform:translateY(8px)}
+    100%{opacity:1;transform:none}
+  }
+
+  /* ---------- 底部波形：柱子位置固定，只有高度在动 ---------- */
+  .ruler{width:100%;margin-top:26px}
+  .viewport{
+    position:relative;height:64px;overflow:hidden;
+    touch-action:none;user-select:none;cursor:grab;
+  }
+  .viewport.grab{cursor:grabbing}
+  .viewport:focus-visible{outline:2px solid #14141433;outline-offset:-6px;border-radius:12px}
+  .b{
+    position:absolute;bottom:14px;width:5px;margin-left:-2.5px;
+    border-radius:3px;background:var(--bar);transform-origin:bottom center;
+    will-change:height,opacity;
+  }
+  .b.stop{background:var(--bar-strong)}
+  .b.on{background:var(--ink);animation:pop .2s ease-out}
+  @keyframes pop{
+    0%{transform:scaleY(.86)}
+    100%{transform:scaleY(1)}
+  }
+  .labels{display:flex;justify-content:space-between;align-items:baseline;padding:0 2px;margin-top:10px;font-size:12px;color:var(--sub)}
+  .labels b{color:var(--ink);font-weight:700;font-size:13px}
+  .hint{margin-top:14px;font-size:12px;color:#b3b0a9;letter-spacing:.08em}
+
+  @media (prefers-reduced-motion:reduce){
+    .art,.b.on{animation:none}
+    .card.swap .inner{animation:none}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <section class="card" id="card">
+    <div class="inner">
+      <div class="art" id="art"></div>
+      <h1 class="price" id="price"></h1>
+      <p class="name" id="name"></p>
+    </div>
+  </section>
+
+  <div class="ruler">
+    <div class="viewport" id="viewport" role="slider" tabindex="0"
+         aria-label="价格标尺" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0" aria-valuetext="">
+      <div class="strip" id="strip"></div>
+    </div>
+    <div class="labels"><span>¥0</span><b>Priceless</b></div>
+  </div>
+
+  <div class="hint">左右拖动 · 滚轮 · ← →</div>
+</div>
+
+<script>
+/* ===== 待替换的内容：art 可放 emoji，也可放图片路径（如 './img/1.png'） ===== */
+const STEPS = [
+  { art:'img/doodle.jpg',   name:'圆圆小像',       price:'¥0'   },
+  { art:'img/dog.jpg',      name:'小狗狗',         price:'¥10'  },
+  { art:'img/chagee.jpg',   name:'霸王茶姬',       price:'¥30'  },
+  { art:'img/wreath.jpg',   name:'圣诞扭扭棒',     price:'¥40'  },
+  { art:'img/kfc.jpg',      name:'肯德基大餐',     price:'¥50'  },
+  { art:'img/hotpot.jpg',   name:'美蛙鱼',         price:'¥89'  },
+  { art:'img/dimoo.jpg',    name:'dimoo小企鹅',    price:'¥120' },
+  { art:'img/sushi.jpg',    name:'滨寿司',         price:'¥200' },
+  { art:'img/pudding.jpg',  name:'布丁狗们',       price:'¥300' },
+  { art:'img/cake.jpg',     name:'生日蛋糕',       price:'¥500' },
+  { art:'🎤',               name:'一场演唱会',     price:'¥1,000'   },
+  { art:'🛵',               name:'一辆小电驴',     price:'¥5,000'   },
+  { art:'✈️',               name:'一次远行',       price:'¥10,000'  },
+  { art:'🏠',               name:'我们的家',       price:'¥1,000,000' },
+  { art:'img/everyday.jpg', name:'有你在的每一天', price:'无价' },
+];
+
+const PITCH = 13;   // 相邻柱子间距
+const H_MAX = 52;   // 波峰高度
+const H_MIN = 14;   // 远处的基准高度
+const SPREAD = 2.8; // 单峰向两侧收拢的宽度（根）
+const NODE_H = 22;  // 档位节点的高度：明显高过旁边的柱子，一眼看到下一档在哪
+
+const $ = s => document.querySelector(s);
+const vp = $('#viewport'), strip = $('#strip'), card = $('#card');
+const artEl = $('#art'), priceEl = $('#price'), nameEl = $('#name');
+const maxIdx = STEPS.length - 1;
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+/* 每档的价格解析成数字（"无价"这类解析不出来 → null），拖动时在相邻两档之间连续插值 */
+const NUM = STEPS.map(s => {
+  const v = parseFloat(String(s.price).replace(/[^\d.]/g, ''));
+  return Number.isFinite(v) ? v : null;
+});
+function priceAt(v) {
+  const k = Math.min(Math.floor(v), maxIdx - 1);
+  const lo = NUM[k], hi = NUM[k + 1];
+  if (lo === null || hi === null) return STEPS[clamp(Math.round(v), 0, maxIdx)].price;  // 挨着"无价"就不再插值
+  return '¥' + Math.round(lo + (hi - lo) * (v - k)).toLocaleString('en-US');
+}
+
+const noise = k => (Math.sin(k * 12.9898) * 43758.5453) % 1;   // 固定噪声，平地上也不死板
+
+let bars = [], n = 0, pad = 0, W = 0;
+let c = 0, cur = -1, curBar = -1, drag = null, target = 0, pc = 0;
+let hs = [], vs = [], amp = 0, phase = 0, running = false, stops = new Set();
+
+/* 柱子位置固定：铺满宽度，其中 STEPS 等间隔落在若干根柱子上 */
+function build() {
+  W = vp.clientWidth;
+  n = Math.max(Math.floor(W / PITCH) + 1, STEPS.length * 2);
+  while ((n - 1) * PITCH > W && n > STEPS.length) n--;   // 柱子不超出可视宽度
+  pad = Math.max(4, (W - (n - 1) * PITCH) / 2);
+  let f = '';
+  for (let i = 0; i < n; i++) f += `<i class="b" style="left:${pad + i * PITCH}px"></i>`;
+  strip.innerHTML = f;
+  bars = [...strip.querySelectorAll('.b')];
+  stops = new Set();
+  for (let k = 0; k <= maxIdx; k++) stops.add(stopBar(k));
+  stops.forEach(i => bars[i]?.classList.add('stop'));
+  hs = new Array(n).fill(0); vs = new Array(n).fill(0); amp = 0; phase = 0;
+  cur = curBar = -1;        // 柱子重建后强制重新标记
+  paintNow();
+}
+
+/* 第 k 档落在第几根柱子上；两端各留 2 根，波峰在端点也能完整露出来 */
+const EDGE = 2;
+function stopBar(k) { return Math.round(EDGE + k * (n - 1 - 2 * EDGE) / maxIdx); }
+/* 连续档位 → 柱子坐标（档内线性插值，拖动时平滑） */
+function posBar(v) {
+  const k = Math.min(Math.floor(v), maxIdx - 1);
+  return stopBar(k) + (v - k) * (stopBar(k + 1) - stopBar(k));
+}
+/* 一档对应多少像素 */
+function stepPx() { return (n - 1 - 2 * EDGE) / maxIdx * PITCH; }
+
+/* 静态形状：只有一个峰，往两侧单调收平，不起第二个包，也不凹下去 */
+function barsPerTier() { return (n - 1 - 2 * EDGE) / maxIdx; }
+function baseWave(i, p) {
+  const sp = Math.min(SPREAD, barsPerTier() * 1.25);   // 档位多了，峰自动收窄，不会盖住隔壁档
+  const d = Math.min(1, Math.abs(i - p) / sp);
+  return Math.pow(Math.cos(d * Math.PI / 2), 3.4);     // 峰尖、两肩迅速矮下去
+}
+function baseH(i, p) {
+  return H_MIN + (H_MAX - H_MIN) * baseWave(i, p) + noise(i) * 1.2;   // 1px 级微差，只为不呆板
+}
+
+function markBar(p) {
+  const b = Math.round(p);
+  if (b === curBar) return;
+  if (curBar >= 0) bars[curBar]?.classList.remove('on');
+  const el = bars[b];
+  if (el) { el.classList.add('on'); el.style.animation = 'none'; void el.offsetWidth; el.style.animation = ''; }
+  curBar = b;
+}
+
+function sync() {
+  const i = clamp(Math.round(c), 0, maxIdx);
+  if (i === cur) return;
+  cur = i;
+  excite(2.5);   // 每跳一档，波形被轻轻碰一下
+  const s = STEPS[i];
+  artEl.innerHTML = /(https?:|data:|[\/.])/.test(s.art) ? `<img src="${s.art}" alt="">` : s.art;
+  priceEl.textContent = priceAt(pc);
+  nameEl.textContent = s.name;
+  card.classList.remove('swap');
+  void card.offsetWidth;                          // 重启动画
+  card.classList.add('swap');
+  vp.setAttribute('aria-valuenow', i);
+  vp.setAttribute('aria-valuemax', maxIdx);
+  vp.setAttribute('aria-valuetext', `${s.name} ${s.price}`);
+}
+
+/* 直接落位，不做动画（首次渲染 / 窗口尺寸变化） */
+function paintNow() {
+  const p = posBar(c);
+  for (let i = 0; i < n; i++) {
+    hs[i] = Math.max(baseH(i, p), stops.has(i) ? NODE_H : 0);
+    bars[i].style.height = hs[i].toFixed(1) + 'px';
+    const op0 = 0.5 + 0.5 * baseWave(i, p);
+    bars[i].style.opacity = (stops.has(i) ? Math.max(op0, 0.95) : op0).toFixed(3);
+  }
+  markBar(p);
+  sync();
+}
+
+/* 每一根柱子都是独立的弹簧：波峰走过去时它们被"带着动"，松手后还会自己荡几下 */
+function tick() {
+  phase += 0.17;
+  amp *= 0.976;
+  if (amp < 0.8) amp = 0;      // 剩下的幅度不到 1px，直接收掉，别空转
+
+  if (!drag) {
+    const d = target - c;
+    if (Math.abs(d) > 0.002) c += d * 0.17; else c = target;
+  }
+
+  /* 价格读数：拖动时跟手，停手后滚进最近一档，读数始终等于那件东西的标价 */
+  if (drag) pc = c;
+  else if (Math.abs(target - c) > 0.002) pc = c;
+  else {
+    const goalPc = Math.round(c);
+    pc += (goalPc - pc) * 0.28;
+    if (Math.abs(goalPc - pc) < 0.002) pc = goalPc;
+  }
+
+  const p = posBar(c);
+  let moving = amp > 0 || Math.abs(target - c) > 0.002 || Math.abs(Math.round(c) - pc) > 0.002;
+
+  for (let i = 0; i < n; i++) {
+    const bell = baseWave(i, p);
+    const wob = amp * bell * bell * 0.9 * Math.sin(i * 0.75 - phase);      // 余振只发生在峰上，不会甩出小包
+    const goal = Math.max(baseH(i, p) + wob, stops.has(i) ? NODE_H : 0);
+    vs[i] = (vs[i] + (goal - hs[i]) * 0.18) * 0.84;
+    hs[i] += vs[i];
+    if (Math.abs(vs[i]) > 0.05) moving = true;
+    bars[i].style.height = Math.max(2, hs[i]).toFixed(1) + 'px';
+    const op = 0.5 + 0.5 * baseWave(i, p);
+    bars[i].style.opacity = (stops.has(i) ? Math.max(op, 0.95) : op).toFixed(3);
+  }
+  markBar(p);
+  sync();
+  priceEl.textContent = priceAt(pc);         // 数字跟着拖动滚，不跳档
+
+  if (moving) requestAnimationFrame(tick);
+  else { running = false; c = target; }
+}
+
+/* 唤醒动画：有动就开，静止就停 */
+function wake() { if (!running) { running = true; requestAnimationFrame(tick); } }
+
+/* 给波形加一点"被碰到"的能量，越大荡得越明显 */
+function excite(v) { amp = Math.min(20, amp + v); wake(); }
+
+/* 平滑靠近目标：只趋近、不过冲 */
+function glide(to) {
+  target = clamp(to, 0, maxIdx);
+  excite(Math.min(6, Math.abs(target - c) * 4 + 1.5));
+  wake();
+}
+
+/* 指针位置 → 连续档位 */
+function xToC(clientX) {
+  const x = clientX - vp.getBoundingClientRect().left;
+  return clamp(((x - pad) / PITCH - EDGE) / (n - 1 - 2 * EDGE) * maxIdx, 0, maxIdx);
+}
+
+/* 拖动：往右拖，波峰就往右走 */
+vp.addEventListener('pointerdown', e => {
+  drag = { x: e.clientX, c, moved: false };
+  vp.classList.add('grab');
+  try { vp.setPointerCapture(e.pointerId); } catch {}
+});
+vp.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x;
+  if (Math.abs(dx) > 3) drag.moved = true;
+  const prev = c;
+  c = clamp(drag.c + dx / stepPx(), 0, maxIdx);
+  target = c;
+  excite(Math.min(5, Math.abs(c - prev) * 14));   // 拖动时只是被带出一点起伏
+  wake();
+});
+function end() {
+  if (!drag) return;
+  const tap = !drag.moved, tapX = drag.x;   // 用按下时的位置，pointerup 的坐标不一定可靠
+  drag = null;
+  vp.classList.remove('grab');
+  excite(14);                              // 松手荡开，像手划过风铃之后
+  if (tap) glide(Math.round(xToC(tapX)));  // 点哪跳哪，落在最近的档上
+}
+vp.addEventListener('pointerup', end);
+vp.addEventListener('pointercancel', end);
+
+/* 滚轮：页面任何位置都能滚 */
+addEventListener('wheel', e => {
+  if (e.ctrlKey) return;                       // 保留浏览器缩放
+  e.preventDefault();
+  const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+  glide(target + d * 0.0035);
+}, { passive: false });
+
+/* 键盘 */
+vp.addEventListener('keydown', e => {
+  const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+  if (!d) return;
+  e.preventDefault();
+  glide(Math.round(target) + d);
+});
+
+addEventListener('resize', () => { const p = c; build(); c = p; paintNow(); });
+build();
+sync();
+</script>
+</body>
+</html>
