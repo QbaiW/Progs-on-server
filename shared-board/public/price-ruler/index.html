@@ -130,6 +130,7 @@ const NODE_H = 22;  // 档位节点的高度：明显高过旁边的柱子，一
 
 const $ = s => document.querySelector(s);
 const vp = $('#viewport'), strip = $('#strip'), card = $('#card');
+const IMG_BASE = location.protocol === 'file:' ? '' : '/price-ruler/';   // 见下方图片路径说明
 const artEl = $('#art'), priceEl = $('#price'), nameEl = $('#name');
 const maxIdx = STEPS.length - 1;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -207,7 +208,10 @@ function sync() {
   cur = i;
   excite(2.5);   // 每跳一档，波形被轻轻碰一下
   const s = STEPS[i];
-  artEl.innerHTML = /(https?:|data:|[\/.])/.test(s.art) ? `<img src="${s.art}" alt="">` : s.art;
+  // 页面既可能以 /price-ruler 也可能以 /price-ruler/ 打开，相对路径会解析到站点根，
+  // 所以 http 下一律补上功能目录；本地双击(file://)保持相对。
+  const src = /^(https?:|data:|\/)/.test(s.art) ? s.art : IMG_BASE + s.art;
+  artEl.innerHTML = /(https?:|data:|[\/.])/.test(s.art) ? `<img src="${src}" alt="">` : s.art;
   priceEl.textContent = priceAt(pc);
   nameEl.textContent = s.name;
   card.classList.remove('swap');
