@@ -44,6 +44,16 @@ module.exports = Object.freeze([
     enabled: true,
   }),
   Object.freeze({
+    id: "price-ruler",
+    title: "心意的价格",
+    description: "拖动波形标尺，看这些东西在圆圆心里各值多少钱，最后一个是无价。",
+    icon: "◇",
+    path: "/price-ruler",
+    entry: "/price-ruler/index.html",
+    order: 55,
+    enabled: true,
+  }),
+  Object.freeze({
     id: "envelopes",
     title: "信封记录",
     description: "一格一个信封，打开就是一个能写字、能贴图的备忘录。",
