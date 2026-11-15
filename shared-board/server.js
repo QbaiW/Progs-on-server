@@ -1655,7 +1655,8 @@ function createStarBottleServer(options = {}) {
     return { enabled, text: enabled ? text : "" };
   }
 
-  function publicPortalFeatures() {
+  // 隐藏的功能只发给管理员会话：访客与用户级账号拿到的目录里没有它们。
+  function publicPortalFeatures(includeHidden = false) {
     const orderedIds = [...portalSettingsDocument.featureOrder, ...listPublicFeatures(featureRegistry).map(f => f.id).filter(id => !portalSettingsDocument.featureOrder.includes(id))];
     return listPublicFeatures(featureRegistry).map((feature) => {
       const override = portalSettingsDocument.features[feature.id];
@@ -1666,9 +1667,35 @@ function createStarBottleServer(options = {}) {
         title: override?.title || feature.title,
         description: override?.description || feature.description,
         featured: override?.featured === true,
+        hidden: override?.hidden === true,
         accent: PORTAL_ACCENTS.has(override?.accent) ? override.accent : "default",
       };
+    }).filter((feature) => includeHidden || !feature.hidden);
+  }
+
+  function hiddenFeatureForPath(pathname) {
+    const normalized = pathname.length > 1 && pathname.endsWith("/")
+      ? pathname.slice(0, -1)
+      : pathname;
+    return featureRegistry.find((feature) =>
+      portalSettingsDocument.features[feature.id]?.hidden === true &&
+      (normalized === feature.path ||
+        normalized.startsWith(`${feature.path}/`) ||
+        normalized === feature.entry),
+    ) || null;
+  }
+
+  function redirectHiddenFeature(request, response, pathname) {
+    if (sessionFor(request)) return false;
+    if (!hiddenFeatureForPath(pathname)) return false;
+    response.writeHead(302, {
+      Location: "/home",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
     });
+    response.end();
+    return true;
   }
 
   function ownerPortalSettings() {
@@ -1680,6 +1707,7 @@ function createStarBottleServer(options = {}) {
         title: override?.title || "",
         description: override?.description || "",
         featured: override?.featured === true,
+        hidden: override?.hidden === true,
         accent: PORTAL_ACCENTS.has(override?.accent) ? override.accent : "default",
       };
     }
@@ -1748,7 +1776,7 @@ function createStarBottleServer(options = {}) {
   }
 
   function ownerPortalSnapshot() {
-    const features = publicPortalFeatures();
+    const features = publicPortalFeatures(true);
     const featureById = new Map(features.map((feature) => [feature.id, feature]));
     const entries = portalActivityDocument.entries.slice().reverse().map((entry) => {
       const label = portalSettingsDocument.visitorLabels[entry.visitorId] || {};
@@ -1833,6 +1861,7 @@ function createStarBottleServer(options = {}) {
       ? PORTAL_ENTRY
       : feature?.entry;
     if (!entry) return false;
+    if (feature && redirectHiddenFeature(request, response, normalizedPath)) return true;
 
     const entryPath = await resolveRegisteredEntry(entry);
     if (!entryPath) return false;
@@ -1963,7 +1992,7 @@ function createStarBottleServer(options = {}) {
         version: 1,
         copy: { ...portalSettingsDocument.copy },
         announcement: publicPortalAnnouncement(),
-        features: publicPortalFeatures(),
+        features: publicPortalFeatures(Boolean(sessionFor(request))),
       }, { Allow: "GET, HEAD, OPTIONS" });
       return true;
     }
@@ -2695,13 +2724,14 @@ function createStarBottleServer(options = {}) {
             if (!plainObject(submitted)) throw requestError(`功能 ${featureId} 的设置格式不正确`);
             assertOnlyKeys(
               submitted,
-              new Set(["title", "description", "featured", "accent", "action"]),
+              new Set(["title", "description", "featured", "hidden", "accent", "action"]),
               `功能 ${featureId} 的设置`,
             );
             const current = features[featureId] || {
               title: "",
               description: "",
               featured: false,
+              hidden: false,
               accent: "default",
             };
             if (submitted.title !== undefined && typeof submitted.title !== "string") {
@@ -2722,6 +2752,9 @@ function createStarBottleServer(options = {}) {
             if (submitted.featured !== undefined && typeof submitted.featured !== "boolean") {
               throw requestError(`功能 ${featureId} 的重点状态必须是 true 或 false`);
             }
+            if (submitted.hidden !== undefined && typeof submitted.hidden !== "boolean") {
+              throw requestError(`功能 ${featureId} 的隐藏状态必须是 true 或 false`);
+            }
             if (submitted.accent !== undefined && !PORTAL_ACCENTS.has(submitted.accent)) {
               throw requestError(`功能 ${featureId} 的强调色无效`);
             }
@@ -2733,6 +2766,7 @@ function createStarBottleServer(options = {}) {
                 ? current.description
                 : submitted.description.trim(),
               featured: submitted.featured ?? current.featured,
+              hidden: submitted.hidden ?? current.hidden === true,
               accent: submitted.accent ?? current.accent,
             };
           }
@@ -2751,7 +2785,7 @@ function createStarBottleServer(options = {}) {
           saved: true,
           version: persisted.version,
           settings: ownerPortalSettings(),
-          features: publicPortalFeatures(),
+          features: publicPortalFeatures(true),
         }, { Allow: "PUT" });
       } catch (error) {
         writeJson(response, error.statusCode || 400, {
@@ -3311,6 +3345,7 @@ function createStarBottleServer(options = {}) {
     if (disabledFeatureEntries.has(normalizedDecodedPath) || disabledFeaturePaths.some((featurePath) =>
       normalizedDecodedPath === featurePath || normalizedDecodedPath.startsWith(`${featurePath}/`),
     )) return false;
+    if (redirectHiddenFeature(request, response, normalizedDecodedPath)) return true;
 
     const candidate = path.resolve(realPublicDir, `.${normalizedDecodedPath}`);
     const relative = path.relative(realPublicDir, candidate);

@@ -236,8 +236,7 @@ test("removed feature history survives restart and later activity writes", async
   assert.equal(persisted.entries.some((entry) => entry.id === retiredEvent.id), true);
 });
 
-test("forwarded address spoofing does not bypass owner login throttling", async (t) => {
-  const { baseUrl } = await startFixture(t);
+test("forwarded address spoofing does not bypass owner login throttling", async (t) => {  const { baseUrl } = await startFixture(t);
   for (let index = 0; index < 10; index += 1) {
     const failed = await requestJson(baseUrl, "/api/owner/login", {
       method: "POST",
@@ -258,4 +257,47 @@ test("forwarded address spoofing does not bypass owner login throttling", async 
   assert.match(nginx, /proxy_set_header CF-Connecting-IP "";/);
   const portalScript = fs.readFileSync(path.join(__dirname, "public", "portal", "home.js"), "utf8");
   assert.doesNotMatch(portalScript, /sessionStorage|ownerToken|\/api\/portal\/activity/);
+});
+
+test("hidden features stay only in the owner catalog and owner pages", async (t) => {
+  const { baseUrl } = await startFixture(t);
+  const ownerCookie = await login(baseUrl);
+
+  const invalid = await requestJson(baseUrl, "/api/owner/portal/settings", {
+    method: "PUT",
+    cookie: ownerCookie,
+    body: { features: { wrong: { hidden: "yes" } } },
+  });
+  assert.equal(invalid.status, 400);
+
+  const saved = await requestJson(baseUrl, "/api/owner/portal/settings", {
+    method: "PUT",
+    cookie: ownerCookie,
+    body: { features: { wrong: { hidden: true } } },
+  });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.settings.features.wrong.hidden, true);
+
+  const anonymousCatalog = await requestJson(baseUrl, "/api/features");
+  assert.equal(anonymousCatalog.body.features.some((feature) => feature.id === "wrong"), false);
+  assert.equal(anonymousCatalog.body.features.some((feature) => feature.id === "star-bottle"), true);
+
+  const ownerCatalog = await requestJson(baseUrl, "/api/features", { cookie: ownerCookie });
+  assert.equal(ownerCatalog.body.features.find((feature) => feature.id === "wrong").hidden, true);
+
+  const snapshot = await requestJson(baseUrl, "/api/owner/portal", { cookie: ownerCookie });
+  assert.equal(snapshot.body.settings.features.wrong.hidden, true);
+  assert.equal(snapshot.body.features.some((feature) => feature.id === "wrong"), true);
+
+  const blockedPage = await fetch(`${baseUrl}/wrong`, { redirect: "manual" });
+  assert.equal(blockedPage.status, 302);
+  assert.equal(blockedPage.headers.get("location"), "/home");
+  assert.equal((await fetch(`${baseUrl}/wrong/index.html`, { redirect: "manual" })).status, 302);
+  assert.equal((await fetch(`${baseUrl}/wrong/assets/red-hammer.png`, { redirect: "manual" })).status, 302);
+
+  const ownerPage = await fetch(`${baseUrl}/wrong`, {
+    headers: { Cookie: ownerCookie },
+    redirect: "manual",
+  });
+  assert.equal(ownerPage.status, 200);
 });

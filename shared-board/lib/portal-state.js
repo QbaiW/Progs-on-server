@@ -55,6 +55,7 @@ function normalizePortalSettingsDocument(raw, featureIds = null) {
         title,
         description,
         featured: feature.featured === true,
+        hidden: feature.hidden === true,
         accent,
       };
     }

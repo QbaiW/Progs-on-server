@@ -130,6 +130,7 @@ function normalizeFeature(value) {
     order: Number.isFinite(value.order) ? value.order : Number.MAX_SAFE_INTEGER,
     enabled: true,
     featured: value.featured === true,
+    hidden: value.hidden === true,
     accent: ACCENTS.has(value.accent) ? value.accent : "default",
   };
 }
@@ -210,6 +211,12 @@ function createFeatureItem(feature) {
     badge.textContent = copyText("featured", "重点");
     heading.append(badge);
   }
+  if (feature.hidden) {
+    const badge = document.createElement("span");
+    badge.className = "featured-label";
+    badge.textContent = "仅管理员可见";
+    heading.append(badge);
+  }
 
   const description = document.createElement("span");
   description.className = "feature-description";
@@ -256,11 +263,9 @@ async function loadFeatures({ quiet = false } = {}) {
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
+    if (!Array.isArray(payload?.features)) throw new Error("功能列表格式不正确");
     renderCopy(payload.copy);
-    const features = Array.isArray(payload?.features)
-      ? payload.features.filter(isFeature).map(normalizeFeature)
-      : [];
-    if (!features.length) throw new Error("功能列表为空");
+    const features = payload.features.filter(isFeature).map(normalizeFeature);
     renderAnnouncement(payload.announcement);
     renderFeatures(features);
   } catch {
@@ -582,12 +587,23 @@ function createFeatureSettings(feature, saved = {}) {
   featuredLabel.htmlFor = featured.id;
   featuredLabel.append(featured, document.createTextNode("设为重点"));
 
+  const hidden = document.createElement("input");
+  hidden.id = `featureHidden-${feature.id}`;
+  hidden.name = "hidden";
+  hidden.type = "checkbox";
+  hidden.checked = typeof saved.hidden === "boolean" ? saved.hidden : feature.hidden === true;
+  const hiddenLabel = document.createElement("label");
+  hiddenLabel.className = "checkbox-label";
+  hiddenLabel.htmlFor = hidden.id;
+  hiddenLabel.append(hidden, document.createTextNode("隐藏（仅管理员可见）"));
+
   const row = document.createElement("div");
   row.className = "feature-settings-row";
   row.append(
     createLabeledControl("卡片标题", title),
     createLabeledControl("强调色", accent),
     featuredLabel,
+    hiddenLabel,
   );
   fieldset.append(row, createLabeledControl("卡片说明", description), createLabeledControl("进入按钮文字", action));
   const move = document.createElement("div");
@@ -790,6 +806,7 @@ function collectFeatureSettings() {
       title: fieldset.querySelector("[name='title']").value.trim(),
       description: fieldset.querySelector("[name='description']").value.trim(),
       featured: fieldset.querySelector("[name='featured']").checked,
+      hidden: fieldset.querySelector("[name='hidden']").checked,
       accent: ACCENTS.has(accent) ? accent : "default",
     };
   }
@@ -885,6 +902,7 @@ async function logoutOwner() {
   elements.status.textContent = copyText("logout", "已退出管理");
   elements.status.dataset.state = "ready";
   elements.logoutButton.disabled = false;
+  void loadFeatures({ quiet: true });
 }
 
 function bindDialogs() {
